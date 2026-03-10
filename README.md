@@ -16,7 +16,7 @@ and medical imaging. However, segmentation of hyperspectral data remains fragmen
 most solutions are tightly coupled to a single dataset, sensor, or domain.
 
 Generic RGB segmentation architectures treat spectral bands as interchangeable channels,
-discarding the physical structure of spectra. GHSST is built from first principles
+discarding the physical structure of spectra. GHOST is built from first principles
 around the physics of hyperspectral data.
 
 ---
