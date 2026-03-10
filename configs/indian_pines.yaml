@@ -1,0 +1,20 @@
+dataset:
+  name: indian_pines
+  data_path: data/indian_pines/Indian_pines_corrected.mat
+  gt_path: data/indian_pines/Indian_pines_gt.mat
+  num_bands: 200
+  num_classes: 17
+  train_ratio: 0.2
+  val_ratio: 0.1
+
+model:
+  num_filters: 8
+  num_blocks: 3
+  base_filters: 32
+
+training:
+  epochs: 300
+  lr: 1e-4
+  weight_decay: 1e-4
+  seed: 42
+  device: cuda
