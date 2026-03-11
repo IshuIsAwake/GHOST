@@ -1,2 +1,0 @@
-best_epoch,test_oa,test_miou,test_dice,test_precision,test_recall
-272,0.6621,0.3385,0.4526,0.5314,0.4408

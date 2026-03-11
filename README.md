@@ -10,18 +10,14 @@ Designed to be sensor-agnostic, domain-agnostic, and configurable for any hypers
 
 ## Motivation
 
-Hyperspectral imaging captures rich material-specific spectral signatures across
-hundreds of wavelength bands. It is used in agriculture, geology, planetary science,
-and medical imaging. However, segmentation of hyperspectral data remains fragmented:
-most solutions are tightly coupled to a single dataset, sensor, or domain.
+Hyperspectral imaging captures rich material-specific spectral signatures across hundreds of wavelength bands. It is used in agriculture, geology, planetary science, and medical imaging. However, segmentation of hyperspectral data remains fragmented — most solutions are tightly coupled to a single dataset, sensor, or domain.
 
-Generic RGB segmentation architectures treat spectral bands as interchangeable channels,
-discarding the physical structure of spectra. GHOST is built from first principles
-around the physics of hyperspectral data.
+Generic RGB segmentation architectures treat spectral bands as interchangeable channels, discarding the physical structure of spectra. GHOST is built from first principles around the physics of hyperspectral data.
 
 ---
 
 ## Architecture
+
 ```
 Input Hyperspectral Cube (B × C × H × W)
 ↓
@@ -33,13 +29,16 @@ Spectral 3D Convolutional Stack (3 blocks)
 3D kernels slide across spectral and spatial dimensions simultaneously.
 Learns the shape of absorption features as they evolve across adjacent wavelength bands.
 Kernel: (7 spectral × 3 spatial × 3 spatial)
+Output: (B, num_filters, C, H, W) — full spectral resolution preserved for transformer.
 ↓
-Squeeze and Excitation Block
-Dynamically re-weights feature channels based on spectral informativeness.
-Learns which wavelength regions matter for the current input.
+Spectral Transformer
+Each spatial pixel becomes a sequence of C band-tokens of dimension num_filters.
+Self-attention learns cross-band relationships (co-occurring absorption features).
+Learned positional embeddings are interpolated dynamically → any band count works.
+Global average pool over spectral dimension → fixed (B, num_filters, H, W) output.
 ↓
-2D Convolutional Encoder (4 levels)
-Reasons spatially over spectral features baked into feature maps.
+2D Convolutional Encoder (4 levels, GroupNorm throughout)
+Reasons spatially over the spectral features.
 Produces skip connections at each resolution level.
 Filters: 32 → 64 → 128 → 256 → 512
 ↓
@@ -50,31 +49,39 @@ Bilinear interpolation handles arbitrary input resolutions.
 Output Segmentation Map (B × num_classes × H × W)
 ```
 
-**Key design principle:** Every architectural decision is physically motivated.
-The 3D convolutions exist because spectral absorption features span ranges of
-wavelengths, not single bands. The continuum removal exists because material
-identity lives in relative spectral shape, not absolute intensity.
+**Key design principles:**
+- 3D convolutions capture absorption features that span ranges of wavelengths, not single bands.
+- Continuum removal strips sensor-specific response — material identity lives in relative spectral shape.
+- The Spectral Transformer collapses variable C bands into a fixed representation via global pooling — this is what makes the model band-count agnostic.
+- GroupNorm replaces BatchNorm everywhere — stable at batch size 1, across datasets with different statistics.
+
+---
+
+## Dataset Agnosticism
+
+GHOST accepts any number of spectral bands at inference without retraining. A model trained on Indian Pines (200 bands) can run inference on Pavia University (103 bands) directly. The Spectral Transformer handles this via interpolated positional embeddings.
+
+**Training:** GPU (patches, B=4)
+**Val / Test / Full-image inference:** CPU (full image creates too many transformer sequences for 6GB GPU)
 
 ---
 
 ## Input / Output Format
 
 ### Input
-A hyperspectral cube of shape `(H × W × C)` where:
-- `H`, `W` are spatial dimensions
-- `C` is the number of spectral bands (sensor-dependent)
+A hyperspectral cube of shape `(H × W × C)` where C is sensor-dependent.
 
 Currently supported loaders:
-- `.mat` files (MATLAB format) — used by Indian Pines, Pavia University, etc.
+- `.mat` files (MATLAB format) — Indian Pines, Pavia University
 
-Planned loaders (see TODO.md):
-- `.hdr` / `.img` (ENVI format) — used by AVIRIS, Hyperion
-- `.nc` (NetCDF) — used by satellite missions
-- `.h5` / `.hdf5` — used by EnMAP, EMIT
-- Custom CSV/binary — for instruments like NIRS3 (Hayabusa-2)
+Planned loaders:
+- `.hdr` / `.img` (ENVI) — AVIRIS, Hyperion
+- `.nc` (NetCDF) — satellite missions
+- `.h5` / `.hdf5` — EnMAP, EMIT
+- Custom binary — NIRS3 (Hayabusa-2)
 
 ### Output
-A segmentation map of shape `(H × W)` where every pixel is assigned a class label.
+Segmentation map `(H × W)` — every pixel assigned a class label.
 
 ---
 
@@ -82,30 +89,31 @@ A segmentation map of shape `(H × W)` where every pixel is assigned a class lab
 
 ### Indian Pines (Earth Remote Sensing)
 - Sensor: AVIRIS
-- Scene: Agricultural land in Indiana, USA
+- Scene: Agricultural land, Indiana USA
 - Dimensions: 145 × 145 × 200 bands
 - Classes: 16 crop and vegetation types
 - Format: `.mat`
 
-Results on 20/10/70 stratified pixel split:
+Current results (real SpectralTransformer, B=4, 16×16 patches):
 ```
-Test OA:   0.894
-Test mIoU: 0.523
-Test Dice: (logged in test_results.csv)
+In progress — training run underway.
 ```
 
-### Ryugu Asteroid (Planetary Science) — In Progress
-- Sensor: NIRS3 (Hayabusa-2 mission, JAXA)
-- Scene: Near-Earth asteroid 162173 Ryugu
-- Classes: Olivine, pyroxene, carbon-rich surface regions
-- Format: Raw spectrometer point data → reprojected onto 3D shape model
-- Status: Preprocessing pipeline in development
+### Pavia University (Zero-Shot Transfer)
+- Sensor: ROSIS
+- Dimensions: 610 × 340 × 103 bands
+- Classes: 9 urban material types
+- Zero-shot: model trained on Indian Pines (200 bands), inference on Pavia (103 bands) with no retraining.
+- Status: agnosticism confirmed, fine-tuning pending.
+
+### Ryugu Asteroid (Planetary Science)
+- Sensor: NIRS3 (Hayabusa-2, JAXA)
+- Status: preprocessing pipeline in development.
 
 ---
 
 ## Reproducibility
 
-All results are reproducible with fixed seeds:
 ```python
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
@@ -116,8 +124,6 @@ numpy.random.seed(42)
 
 ## Configuration
 
-Every parameter is defined in a YAML config file.
-To adapt this framework to a new dataset, only the config needs to change.
 ```yaml
 dataset:
   name: indian_pines
@@ -132,13 +138,23 @@ model:
 training:
   epochs: 300
   lr: 1e-4
+  batch_size: 4
+  patch_size: 16
 ```
 
 ---
 
-## Training
+## Usage
+
 ```bash
+# Train on Indian Pines
 python train.py
+
+# Sanity check all components
+python helper.py
+
+# Zero-shot transfer test (requires best_model.pth from training)
+python test_pavia_zeroshot.py
 ```
 
 Outputs:
@@ -158,24 +174,41 @@ Outputs:
 | Precision | Per class, macro averaged |
 | Recall | Per class, macro averaged |
 
-All metrics 
-
 ---
 
 ## Project Structure
+
 ```
 GHOST/
-├── data/                           # datasets (not tracked by git)
-├── datasets/                       # dataset loaders
-├── models/                         # architecture components
-├── preprocessing/                  # continuum removal and future preprocessors
-├── configs/                        # yaml configuration files
-├── baseline_version1_results/      # baseline results csv to improve on
-├── train.py                        # training and evaluation script
+├── data/                        # datasets (not tracked by git)
+├── datasets/                    # dataset loaders
+│   ├── indian_pines.py
+│   └── pavia_university.py
+├── models/                      # architecture components
+│   ├── hyperspectral_net.py     # full pipeline
+│   ├── spectral_3d_block.py     # 3D conv stack
+│   ├── real_spectral_transformer.py  # spectral self-attention
+│   ├── encoder_2d.py            # U-Net encoder
+│   └── decoder_2d.py            # U-Net decoder
+├── preprocessing/
+│   └── continuum_removal.py
+├── configs/
+│   └── indian_pines.yaml
+├── train.py
+├── helper.py                    # component sanity checks
+├── test_pavia_zeroshot.py       # band-agnosticism test
 ├── README.md
-├── TODO.md
-└── requirements.txt
+└── TODO.md
 ```
+
+---
+
+## Hardware Notes
+
+Training verified on RTX 3050 6GB (laptop):
+- Training: B=4, 16×16 patches → ~4.4GB peak VRAM
+- Val/Test: CPU inference (full image too large for 6GB GPU)
+- Kill any zombie GPU processes before training: `nvidia-smi` to check, `kill -9 <PID>` to clear.
 
 ---
 
