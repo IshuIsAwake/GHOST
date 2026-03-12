@@ -45,7 +45,7 @@ class HyperspectralDataset(Dataset):
     def __init__(self, data_path, gt_path, split='train',
                  train_ratio=0.2, val_ratio=0.1,
                  data_key=None, labels_key=None,
-                 seed=42):
+                 seed=42 , use_fp16=False):
 
         # ── Load ─────────────────────────────────────────────────────────────
         data_mat   = scipy.io.loadmat(data_path)
@@ -62,8 +62,14 @@ class HyperspectralDataset(Dataset):
         self.num_bands   = C
         self.num_classes = int(labels.max()) + 1  # +1 to include background class 0
 
-        # ── Normalize ─────────────────────────────────────────────────────────
-        data = (data - data.mean()) / (data.std() + 1e-8)
+        if use_fp16:
+            # Min-Max scaling to prevent FP16 NaN overflows during Continuum Removal
+            data_min = data.min()
+            data_max = data.max()
+            data = (data - data_min) / (data_max - data_min + 1e-8)
+        else:
+            # Original Z-score normalization for FP32
+            data = (data - data.mean()) / (data.std() + 1e-8)
 
         self.data   = torch.tensor(data).permute(2, 0, 1)  # (C, H, W)
         self.labels = torch.tensor(labels).long()          # (H, W)

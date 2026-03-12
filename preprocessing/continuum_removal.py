@@ -2,12 +2,15 @@ import torch
 import torch.nn as nn
 
 class ContinuumRemoval(nn.Module):
-    def __init__(self):
+    def __init__(self , use_fp16 = False):
         super().__init__()
-
+        self.use_fp16 = use_fp16
     def forward(self, x):
         # x shape: (B, C, H, W)
         # Continuum removal operates on the spectral dimension (C)
+
+        if self.use_fp16:
+            x = x.clamp(min=1e-6)
         
         B, C, H, W = x.shape
         

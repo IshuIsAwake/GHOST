@@ -20,10 +20,10 @@ class HyperspectralNet(nn.Module):
     SE and Encoder are instantiated with that channel count automatically.
     """
 
-    def __init__(self, num_bands, num_classes, num_filters=8, num_blocks=3, base_filters=32):
+    def __init__(self, num_bands, num_classes, num_filters=8, num_blocks=3, base_filters=32 , use_fp16=False):
         super().__init__()
 
-        self.continuum_removal = ContinuumRemoval()
+        self.continuum_removal = ContinuumRemoval(use_fp16=use_fp16)
 
         self.spectral_3d = Spectral3DStack(
             num_bands=num_bands,

@@ -44,9 +44,9 @@ np.random.seed(args.seed)
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # ── Datasets ──────────────────────────────────────────────────────────────────
-train_ds = HyperspectralDataset(args.data, args.gt, split='train', train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed)
-val_ds   = HyperspectralDataset(args.data, args.gt, split='val',   train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed)
-test_ds  = HyperspectralDataset(args.data, args.gt, split='test',  train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed)
+train_ds = HyperspectralDataset(args.data, args.gt, split='train', train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed, use_fp16=args.fp16)
+val_ds   = HyperspectralDataset(args.data, args.gt, split='val',   train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed, use_fp16=args.fp16)
+test_ds  = HyperspectralDataset(args.data, args.gt, split='test',  train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed, use_fp16=args.fp16)
 
 train_loader = DataLoader(train_ds, batch_size=1, shuffle=False)
 val_loader   = DataLoader(val_ds,   batch_size=1, shuffle=False)
@@ -58,7 +58,8 @@ model = HyperspectralNet(
     num_classes=train_ds.num_classes,
     num_filters=args.num_filters,
     num_blocks=args.num_blocks,
-    base_filters=args.base_filters
+    base_filters=args.base_filters,
+    use_fp16=args.fp16
 ).to(DEVICE)
 
 print(f"Training on {DEVICE} | {'fp16 (mixed precision)' if args.fp16 else 'fp32 (full precision)'}")
