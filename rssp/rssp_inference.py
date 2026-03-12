@@ -2,125 +2,207 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from models.hyperspectral_net import HyperspectralNet
+from rssp.sssr_router import SSSRRouter
 
 
-def predict_node(models_info, data, device, voting='weighted'):
-    num_classes     = models_info[0]['num_classes']
-    local_to_global = models_info[0]['local_to_global']
-    H, W            = data.shape[2], data.shape[3]
-    num_bands       = data.shape[1]
-    prob_sum        = torch.zeros(1, num_classes, H, W)
+# ─────────────────────────────────────────────────────────────────────────────
+# Forest ensemble → global probability map
+# ─────────────────────────────────────────────────────────────────────────────
 
-    for info in models_info:
+def get_global_soft_probs(node_info: dict, data: torch.Tensor,
+                          device, num_global_classes: int) -> torch.Tensor:
+    """
+    Run the forest ensemble for one node.
+    Averages softmax probabilities across all forest members.
+    Maps local class IDs → global class IDs.
+
+    Returns: (B, num_global_classes, H, W) on CPU
+    """
+    forests         = node_info['forests']
+    local_to_global = forests[0]['local_to_global']
+    B, _, H, W      = data.shape
+
+    prob_sum = torch.zeros(B, forests[0]['num_classes'], H, W)
+
+    for info in forests:
         model = HyperspectralNet(
-            num_bands=info['num_bands'],
-            num_classes=info['num_classes'],
-            num_filters=info['num_filters'],
-            num_blocks=info['num_blocks'],
-            base_filters=info['base_filters']
+            num_bands    = info['num_bands'],
+            num_classes  = info['num_classes'],
+            num_filters  = info['num_filters'],
+            num_blocks   = info['num_blocks'],
+            base_filters = info['base_filters']
         ).to(device)
         model.load_state_dict({k: v.to(device) for k, v in info['state_dict'].items()})
         model.eval()
 
         with torch.no_grad():
-            logits = model(data.to(device)).cpu()
-            probs  = F.softmax(logits, dim=1)
+            logits   = model(data.to(device)).cpu()
+            prob_sum += F.softmax(logits, dim=1)
 
-        if voting == 'hard':
-            prob_sum += (probs == probs.max(dim=1, keepdim=True).values).float()
-        else:
-            prob_sum += probs
+        del model
+        if device != 'cpu':
+            torch.cuda.empty_cache()
 
-    prob_avg              = prob_sum / len(models_info)
-    confidence, local_pred = prob_avg.max(dim=1)
-    confidence  = confidence[0].numpy()
-    local_pred  = local_pred[0].numpy()
+    prob_avg = prob_sum / len(forests)                      # (B, local_classes, H, W)
 
-    pred_global = np.zeros_like(local_pred)
+    # Remap to global class space
+    global_probs = torch.zeros(B, num_global_classes, H, W)
     for local_id, global_id in local_to_global.items():
-        pred_global[local_pred == local_id] = global_id
+        if global_id < num_global_classes:
+            global_probs[:, global_id] = prob_avg[:, local_id]
 
-    return pred_global, confidence
+    return global_probs                                      # CPU
 
 
-def cascade_inference(tree, trained_models, data, device,
-                      voting='weighted', threshold=0.7,
-                      node_id='root', pixel_mask=None):
+# ─────────────────────────────────────────────────────────────────────────────
+# Temperature-sharpened routing
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sharpen(p: torch.Tensor, temperature: float) -> torch.Tensor:
     """
-    pixel_mask: (H, W) boolean numpy array
-                Only these pixels are valid for this node.
-                None means all pixels (root call).
+    Sharpen routing probability p toward 0 or 1.
+
+    temperature = 1.0  → no change (full soft routing)
+    temperature = 10.0 → near-hard routing (recommended when SSM is weak)
+    temperature → ∞    → hard routing
+
+    Formula: p^t / (p^t + (1-p)^t)
     """
-    H, W = data.shape[2], data.shape[3]
+    if temperature <= 1.0:
+        return p
+    p_c     = p.clamp(1e-6, 1 - 1e-6)
+    p_t     = p_c ** temperature
+    one_p_t = (1.0 - p_c) ** temperature
+    return p_t / (p_t + one_p_t)
 
-    if pixel_mask is None:
-        pixel_mask = np.ones((H, W), dtype=bool)
 
-    result = np.zeros((H, W), dtype=np.int64)
+# ─────────────────────────────────────────────────────────────────────────────
+# Soft cascade inference
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Get this node's predictions
-    node_models              = trained_models[node_id]
-    pred_global, confidence  = predict_node(node_models, data, device, voting)
+def cascade_soft_inference(tree: dict,
+                           trained_models: dict,
+                           data: torch.Tensor,
+                           ssm_encoder,
+                           device,
+                           num_global_classes: int,
+                           node_id: str = 'root',
+                           path_weight: torch.Tensor = None,
+                           fingerprints: torch.Tensor = None,
+                           temperature: float = 10.0) -> torch.Tensor:
+    """
+    Temperature-controlled soft-routed RSSP cascade inference.
 
-    # Only trust predictions within our pixel_mask
-    pred_global[~pixel_mask] = 0
-    confidence[~pixel_mask]  = 0.0
+    temperature dial:
+      1.0  = fully soft (only use with strong SSM — spreads prob everywhere)
+      10.0 = near-hard (default — uses SSSR signal only when confident)
+      50+  = effectively hard routing
 
-    # Leaf node - return directly
+    path_weight:  (B, 1, H, W) cumulative routing weight along this branch.
+    fingerprints: (B, d_model, H, W) pre-computed once at root, passed down.
+
+    Returns: (B, num_global_classes, H, W) weighted probability tensor on CPU.
+    """
+    B, _, H, W = data.shape
+
+    # ── Compute fingerprints once at root ────────────────────────────────────
+    if fingerprints is None:
+        ssm_encoder.eval()
+        with torch.no_grad():
+            fingerprints = ssm_encoder(data.to(device)).cpu()  # (B, d_model, H, W)
+
+    if path_weight is None:
+        path_weight = torch.ones(B, 1, H, W)
+
+    # ── Single-class leaf: no model trained, trivial prediction ──────────────
+    if node_id not in trained_models:
+        classes      = tree['classes']
+        global_probs = torch.zeros(B, num_global_classes, H, W)
+        if len(classes) == 1 and classes[0] < num_global_classes:
+            global_probs[:, classes[0]] = 1.0
+        return global_probs * path_weight
+
+    node_info  = trained_models[node_id]
+    node_probs = get_global_soft_probs(
+        node_info, data, device, num_global_classes)           # (B, G, H, W) CPU
+
+    # ── Structural leaf: no children in tree ─────────────────────────────────
     if tree['left'] is None and tree['right'] is None:
-        result[pixel_mask] = pred_global[pixel_mask]
-        return result
+        return node_probs * path_weight
 
-    left_classes  = set(tree['left']['classes'])  if tree['left']  else set()
-    right_classes = set(tree['right']['classes']) if tree['right'] else set()
+    # ── Load router, compute and sharpen routing probabilities ───────────────
+    router = SSSRRouter(d_model=node_info['d_model'])
+    if node_info['router_state'] is not None:
+        router.load_state_dict(node_info['router_state'])
+    router.eval()
 
-    # Route pixels to children based on this node's predictions
-    left_pixel_mask  = pixel_mask & np.isin(pred_global, list(left_classes))
-    right_pixel_mask = pixel_mask & np.isin(pred_global, list(right_classes))
+    with torch.no_grad():
+        p_left_raw = router(fingerprints)                       # (B, H, W) CPU
 
-    # Handle threshold voting
-    if voting == 'threshold':
-        uncertain              = pixel_mask & (confidence < threshold)
-        left_pixel_mask        = left_pixel_mask  & (confidence >= threshold)
-        right_pixel_mask       = right_pixel_mask & (confidence >= threshold)
-        result[uncertain]      = pred_global[uncertain]  # keep parent prediction
+    p_left  = sharpen(p_left_raw, temperature).unsqueeze(1)    # (B, 1, H, W)
+    p_right = 1.0 - p_left
 
-    # Set current predictions for pixels not going deeper
-    result[pixel_mask] = pred_global[pixel_mask]
+    result = torch.zeros(B, num_global_classes, H, W)
 
-    # Recurse left
-    if tree['left'] and len(tree['left']['classes']) > 1:
+    # ── Left subtree ─────────────────────────────────────────────────────────
+    if tree['left'] is not None:
         left_id = node_id + '_L'
-        if left_id in trained_models and left_pixel_mask.sum() > 0:
-            left_pred          = cascade_inference(
-                tree['left'], trained_models, data,
-                device, voting, threshold,
-                left_id, left_pixel_mask          # ← pass mask
-            )
-            result[left_pixel_mask] = left_pred[left_pixel_mask]
+        result += cascade_soft_inference(
+            tree['left'], trained_models, data, ssm_encoder, device,
+            num_global_classes, left_id,
+            path_weight * p_left, fingerprints, temperature
+        )
 
-    # Recurse right
-    if tree['right'] and len(tree['right']['classes']) > 1:
+    # ── Right subtree ────────────────────────────────────────────────────────
+    if tree['right'] is not None:
         right_id = node_id + '_R'
-        if right_id in trained_models and right_pixel_mask.sum() > 0:
-            right_pred          = cascade_inference(
-                tree['right'], trained_models, data,
-                device, voting, threshold,
-                right_id, right_pixel_mask        # ← pass mask
-            )
-            result[right_pixel_mask] = right_pred[right_pixel_mask]
+        result += cascade_soft_inference(
+            tree['right'], trained_models, data, ssm_encoder, device,
+            num_global_classes, right_id,
+            path_weight * p_right, fingerprints, temperature
+        )
 
     return result
 
 
-def compute_rssp_metrics(pred, labels_np, num_classes):
+# ─────────────────────────────────────────────────────────────────────────────
+# Final prediction and metrics
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_inference(tree, trained_models, data, ssm_encoder, device,
+                  num_global_classes, temperature: float = 10.0) -> np.ndarray:
+    """
+    Runs cascade_soft_inference and returns argmax prediction.
+
+    temperature: 10.0 = near-hard routing (recommended with weak SSM)
+                 1.0  = fully soft routing (use only with strong SSM)
+
+    Returns: (H, W) numpy array of predicted global class IDs.
+    """
+    with torch.no_grad():
+        weighted_probs = cascade_soft_inference(
+            tree, trained_models,
+            data.unsqueeze(0) if data.dim() == 3 else data,
+            ssm_encoder, device, num_global_classes,
+            temperature=temperature
+        )                                                       # (1, G, H, W)
+
+    pred = weighted_probs.squeeze(0).argmax(dim=0).numpy()     # (H, W)
+    return pred
+
+
+def compute_rssp_metrics(pred: np.ndarray,
+                         labels_np: np.ndarray,
+                         num_classes: int):
+    """OA, mIoU, Dice, Precision, Recall over labeled pixels only."""
     mask     = labels_np > 0
     pred_m   = pred[mask]
     target_m = labels_np[mask]
 
     oa = (pred_m == target_m).sum() / target_m.size
 
-    ious = []
+    ious, dices, precisions, recalls = [], [], [], []
+
     for c in range(1, num_classes):
         pred_c   = pred_m == c
         target_c = target_m == c
@@ -130,6 +212,13 @@ def compute_rssp_metrics(pred, labels_np, num_classes):
         union = tp + fp + fn
         if union > 0:
             ious.append(tp / union)
+            dices.append((2 * tp) / (2 * tp + fp + fn + 1e-8))
+            precisions.append(tp / (tp + fp + 1e-8))
+            recalls.append(tp / (tp + fn + 1e-8))
 
-    miou = sum(ious) / len(ious) if ious else 0
-    return float(oa), float(miou)
+    miou      = sum(ious)       / len(ious)       if ious       else 0.0
+    dice      = sum(dices)      / len(dices)      if dices      else 0.0
+    precision = sum(precisions) / len(precisions) if precisions else 0.0
+    recall    = sum(recalls)    / len(recalls)    if recalls    else 0.0
+
+    return float(oa), float(miou), float(dice), float(precision), float(recall)
