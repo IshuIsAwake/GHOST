@@ -1,0 +1,31 @@
+[PDS3] ato00027155_01_if126s_trr3.img
+  Dims:      195 lines × 640 samples × 107 bands
+  Interleave: LINE_INTERLEAVED
+  Dtype:     float32  (PC_REAL, 32-bit)
+  Unit:      I_OVER_F
+  Loaded:     cube (107, 195, 640)  labels (195, 640)
+cube shape: (107, 195, 640)
+cube nan sum: 0
+valid mean: 2.340193e-08 valid std: 1.0
+valid min: -0.3003232 valid max: 3.3298285
+
+Channel 0
+  lo: -0.30032, hi: 3.32983
+  ch unique count: 54
+  out_ch unique count: 37
+  out_ch min: 0.00000, max: 1.00000
+  out_ch sample unique values: [0.0000000e+00 8.2096712e-09 1.6419342e-08 2.4629015e-08 3.2838685e-08] ... [2.6270948e-07 2.7091917e-07 2.7912884e-07 2.8733851e-07 1.0000000e+00]
+
+Channel 1
+  lo: -0.30031, hi: 3.32983
+  ch unique count: 138
+  out_ch unique count: 114
+  out_ch min: 0.00000, max: 1.00000
+  out_ch sample unique values: [0.0000000e+00 8.2096818e-09 1.6419364e-08 2.4629045e-08 3.2838727e-08] ... [8.9485530e-07 9.0306503e-07 9.1127470e-07 9.1948436e-07 1.0000000e+00]
+
+Channel 2
+  lo: -0.30031, hi: 3.32983
+  ch unique count: 154
+  out_ch unique count: 128
+  out_ch min: 0.00000, max: 1.00000
+  out_ch sample unique values: [0.0000000e+00 8.2096827e-09 1.6419365e-08 2.4629047e-08 3.2838731e-08] ... [1.0097909e-06 1.0180006e-06 1.0262103e-06 1.0344199e-06 1.0000000e+00]

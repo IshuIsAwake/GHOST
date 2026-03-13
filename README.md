@@ -12,6 +12,14 @@ Feed it data. Get a segmentation map.
 
 The goal is the same out-of-box promise that nnUNet delivers for medical images or YOLO delivers for object detection — except for hyperspectral imagery across every domain: Earth observation, planetary science (Mars CRISM, asteroid Ryugu), medical imaging (retinal scans, brain tissue), materials science, and beyond.
 
+### 🔭 Planetary Science & Multi-Mission Support
+For the Hackathon, GHOST now natively supports professional planetary science and astronomy formats directly from the NASA PDS and ESA archives:
+- **Mars CRISM (PDS3)**: Load `.img` + `.lbl` raw reflectance cubes.
+- **Ryugu NIRS3 (FITS)**: Direct support for astronomical FITS cubes.
+- **ENVI**: Support for standard `.hdr` + `.dat`/`.raw` exports from CAT/GDAL.
+- **HDF5**: Generic support for EMIT and various multi-mission containers.
+- **MATLAB (.mat)**: Legacy support for Indian Pines, Pavia Uni, etc.
+
 ---
 
 ## Inspiration
@@ -188,14 +196,16 @@ GHOST/
 ├── preprocessing/
 │   └── continuum_removal.py   # Physics-informed preprocessing
 ├── datasets/
-│   └── hyperspectral_dataset.py  # Universal .mat loader
-├── rssp/
-│   ├── sam_clustering.py      # SAM-based tree builder
-│   ├── rssp_trainer.py        # Node + router training
-│   ├── rssp_inference.py      # Soft cascade inference
-│   ├── ssm_pretrain.py        # SSM encoder pretraining
-│   └── sssr_router.py         # Per-node routing heads
-├── train.py                   # Flat model training
+│   ├── hyperspectral_dataset.py  # Universal format dispatcher
+│   ├── pds3_reader.py            # NASA PDS3 (CRISM) reader
+│   ├── envi_reader.py            # ENVI (CAT/GDAL) reader
+│   ├── fits_reader.py            # FITS (Ryugu NIRS3) reader
+│   └── hdf5_reader.py            # HDF5 (EMIT/Multi-mission) reader
+├── visualize/
+│   ├── utils.py                  # Plotting & PNG generation logic
+│   └── __init__.py
+├── visualize.py                   # CLI for generating insights
+├── train.py                       # Flat model training
 ├── train_rssp.py              # RSSP + SSSR training
 └── docs/
     ├── README.md
