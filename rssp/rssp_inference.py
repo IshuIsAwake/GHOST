@@ -55,29 +55,33 @@ def get_global_soft_probs(node_info: dict, data: torch.Tensor,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Temperature-sharpened routing
+# Forest-derived routing probability
 # ─────────────────────────────────────────────────────────────────────────────
 
-def sharpen(p: torch.Tensor, temperature: float) -> torch.Tensor:
+def forest_routing_prob(node_probs: torch.Tensor,
+                        left_classes: list,
+                        num_global_classes: int) -> torch.Tensor:
     """
-    Sharpen routing probability p toward 0 or 1.
+    Derive p_left from the forest ensemble's own predictions.
 
-    temperature = 1.0  → no change (full soft routing)
-    temperature = 10.0 → near-hard routing (recommended when SSM is weak)
-    temperature → ∞    → hard routing
+    Sum the probability mass the forest assigns to left-child classes.
+    This is the forest's opinion on "does this pixel belong to the left subtree?"
 
-    Formula: p^t / (p^t + (1-p)^t)
+    node_probs:  (B, num_global_classes, H, W) — forest ensemble prediction
+    left_classes: list of global class IDs in the left child
+
+    Returns: (B, 1, H, W) — p_left ∈ [0, 1]
     """
-    if temperature <= 1.0:
-        return p
-    p_c     = p.clamp(1e-6, 1 - 1e-6)
-    p_t     = p_c ** temperature
-    one_p_t = (1.0 - p_c) ** temperature
-    return p_t / (p_t + one_p_t)
+    B, G, H, W = node_probs.shape
+    p_left = torch.zeros(B, 1, H, W)
+    for c in left_classes:
+        if c < G:
+            p_left += node_probs[:, c:c+1, :, :]
+    return p_left.clamp(1e-6, 1 - 1e-6)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Soft cascade inference
+# Soft cascade inference — hybrid forest+SSM routing
 # ─────────────────────────────────────────────────────────────────────────────
 
 def cascade_soft_inference(tree: dict,
@@ -89,14 +93,16 @@ def cascade_soft_inference(tree: dict,
                            node_id: str = 'root',
                            path_weight: torch.Tensor = None,
                            fingerprints: torch.Tensor = None,
-                           temperature: float = 10.0) -> torch.Tensor:
+                           routing: str = 'hybrid') -> torch.Tensor:
     """
-    Temperature-controlled soft-routed RSSP cascade inference.
+    Soft-routed RSSP cascade inference with three routing modes:
 
-    temperature dial:
-      1.0  = fully soft (only use with strong SSM — spreads prob everywhere)
-      10.0 = near-hard (default — uses SSSR signal only when confident)
-      50+  = effectively hard routing
+      'hybrid'  — forest prediction as base, SSM corrects when confident (default)
+      'forest'  — forest-only soft routing, no SSM used
+      'soft'    — SSM-only routing (original SSSR behavior)
+
+    The hybrid mode naturally degrades to forest-only when SSM confidence
+    is low — so SSSR is purely additive. Worst case = same as forest routing.
 
     path_weight:  (B, 1, H, W) cumulative routing weight along this branch.
     fingerprints: (B, d_model, H, W) pre-computed once at root, passed down.
@@ -105,8 +111,8 @@ def cascade_soft_inference(tree: dict,
     """
     B, _, H, W = data.shape
 
-    # ── Compute fingerprints once at root ────────────────────────────────────
-    if fingerprints is None:
+    # ── Compute fingerprints once at root (only when SSM is used) ─────────────
+    if fingerprints is None and routing in ('hybrid', 'soft'):
         ssm_encoder.eval()
         with torch.no_grad():
             fingerprints = ssm_encoder(data.to(device)).cpu()  # (B, d_model, H, W)
@@ -130,16 +136,47 @@ def cascade_soft_inference(tree: dict,
     if tree['left'] is None and tree['right'] is None:
         return node_probs * path_weight
 
-    # ── Load router, compute and sharpen routing probabilities ───────────────
-    router = SSSRRouter(d_model=node_info['d_model'])
-    if node_info['router_state'] is not None:
-        router.load_state_dict(node_info['router_state'])
-    router.eval()
+    # ── Internal node: compute routing probabilities ─────────────────────────
 
-    with torch.no_grad():
-        p_left_raw = router(fingerprints)                       # (B, H, W) CPU
+    left_classes = tree['left']['classes']
 
-    p_left  = sharpen(p_left_raw, temperature).unsqueeze(1)    # (B, 1, H, W)
+    if routing == 'forest':
+        # Pure forest-derived routing — no SSM at all
+        p_left = forest_routing_prob(node_probs, left_classes, num_global_classes)
+
+    elif routing == 'soft':
+        # Pure SSM routing (original SSSR behavior)
+        router = SSSRRouter(d_model=node_info['d_model'])
+        if node_info['router_state'] is not None:
+            router.load_state_dict(node_info['router_state'])
+        router.eval()
+        with torch.no_grad():
+            p_left = router(fingerprints).unsqueeze(1)         # (B, 1, H, W)
+
+    elif routing == 'hybrid':
+        # Hybrid: forest as base, SSM corrects when confident
+        f_p_left = forest_routing_prob(
+            node_probs, left_classes, num_global_classes)      # (B, 1, H, W)
+
+        router = SSSRRouter(d_model=node_info['d_model'])
+        if node_info['router_state'] is not None:
+            router.load_state_dict(node_info['router_state'])
+        router.eval()
+
+        with torch.no_grad():
+            ssm_p_left = router(fingerprints).unsqueeze(1)     # (B, 1, H, W)
+
+        # SSM confidence: 0 when p=0.5 (uncertain), 1 when p=0 or p=1 (confident)
+        ssm_confidence = (2.0 * (ssm_p_left - 0.5).abs()).clamp(0, 1)
+
+        # Confidence-gated hybrid: trust forest as base, let SSM correct
+        # when confident.  When SSM sucks → low confidence → pure forest routing
+        p_left = f_p_left + ssm_confidence * (ssm_p_left - f_p_left)
+        p_left = p_left.clamp(1e-6, 1 - 1e-6)
+
+    else:
+        raise ValueError(f"Unknown routing mode: '{routing}'. Use 'hybrid', 'forest', or 'soft'.")
+
     p_right = 1.0 - p_left
 
     result = torch.zeros(B, num_global_classes, H, W)
@@ -150,7 +187,7 @@ def cascade_soft_inference(tree: dict,
         result += cascade_soft_inference(
             tree['left'], trained_models, data, ssm_encoder, device,
             num_global_classes, left_id,
-            path_weight * p_left, fingerprints, temperature
+            path_weight * p_left, fingerprints, routing
         )
 
     # ── Right subtree ────────────────────────────────────────────────────────
@@ -159,7 +196,7 @@ def cascade_soft_inference(tree: dict,
         result += cascade_soft_inference(
             tree['right'], trained_models, data, ssm_encoder, device,
             num_global_classes, right_id,
-            path_weight * p_right, fingerprints, temperature
+            path_weight * p_right, fingerprints, routing
         )
 
     return result
@@ -170,12 +207,13 @@ def cascade_soft_inference(tree: dict,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_inference(tree, trained_models, data, ssm_encoder, device,
-                  num_global_classes, temperature: float = 10.0) -> np.ndarray:
+                  num_global_classes, routing: str = 'hybrid') -> np.ndarray:
     """
     Runs cascade_soft_inference and returns argmax prediction.
 
-    temperature: 10.0 = near-hard routing (recommended with weak SSM)
-                 1.0  = fully soft routing (use only with strong SSM)
+    routing: 'hybrid'  — forest + SSM hybrid (default, recommended)
+             'forest'  — forest-only soft routing (no SSM)
+             'soft'    — SSM-only routing (original SSSR)
 
     Returns: (H, W) numpy array of predicted global class IDs.
     """
@@ -184,7 +222,7 @@ def run_inference(tree, trained_models, data, ssm_encoder, device,
             tree, trained_models,
             data.unsqueeze(0) if data.dim() == 3 else data,
             ssm_encoder, device, num_global_classes,
-            temperature=temperature
+            routing=routing
         )                                                       # (1, G, H, W)
 
     pred = weighted_probs.squeeze(0).argmax(dim=0).numpy()     # (H, W)

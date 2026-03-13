@@ -5,13 +5,12 @@ from preprocessing.continuum_removal import ContinuumRemoval
 
 class SpectralSSM(nn.Module):
     """
-    Lightweight selective SSM.
-    Treats each spectral band as a timestep in a sequence.
-
-    The 'selective' part: A, B, C matrices are functions of the
-    current input — the model decides per-band how much to remember
-    vs. forget. This is what distinguishes Mamba from a vanilla RNN.
-
+    Parallel multi-scale 1D CNN replacement for sequential RNN SSM.
+    
+    Solves vanishing gradients over 200+ bands while capturing the "selective" 
+    spirit of SSMs by using parallel filters at different scales (narrow, mid, 
+    wide) and selectively gating them via a channel attention mechanism.
+    
     Input:  (N, C)       — N pixel spectra, C bands (continuum-removed)
     Output: (N, d_model) — per-pixel spectral fingerprints
     """
@@ -19,49 +18,77 @@ class SpectralSSM(nn.Module):
     def __init__(self, d_model: int = 64, d_state: int = 16):
         super().__init__()
         self.d_model = d_model
-        self.d_state = d_state
-
-        # Project each band scalar → embedding
-        self.input_proj = nn.Linear(1, d_model)
-
-        # Log-parameterised decay: always negative after negation → stable
-        self.A_log = nn.Parameter(torch.randn(d_model, d_state) * 0.1)
-
-        # Input-dependent selection matrices (the selective mechanism)
-        self.B_proj = nn.Linear(d_model, d_state, bias=False)
-        self.C_proj = nn.Linear(d_model, d_state, bias=False)
-
-        # Skip / residual connection weight
-        self.D = nn.Parameter(torch.ones(d_model))
-
-        self.out_proj = nn.Linear(d_model, d_model)
-        self.norm     = nn.LayerNorm(d_model)
+        
+        # d_state becomes the number of filters per branch
+        filters = d_state 
+        
+        # 1. Parallel Multi-Scale Feature Extraction
+        self.narrow_branch = nn.Sequential(
+            nn.Conv1d(1, filters, kernel_size=7, padding=3),
+            nn.BatchNorm1d(filters),
+            nn.GELU(),
+            nn.Conv1d(filters, filters, kernel_size=7, padding=3),
+            nn.BatchNorm1d(filters),
+            nn.GELU()
+        )
+        
+        self.mid_branch = nn.Sequential(
+            nn.Conv1d(1, filters, kernel_size=15, padding=7),
+            nn.BatchNorm1d(filters),
+            nn.GELU(),
+            nn.Conv1d(filters, filters, kernel_size=15, padding=7),
+            nn.BatchNorm1d(filters),
+            nn.GELU()
+        )
+        
+        self.wide_branch = nn.Sequential(
+            nn.Conv1d(1, filters, kernel_size=31, padding=15),
+            nn.BatchNorm1d(filters),
+            nn.GELU(),
+            nn.Conv1d(filters, filters, kernel_size=31, padding=15),
+            nn.BatchNorm1d(filters),
+            nn.GELU()
+        )
+        
+        total_filters = filters * 3
+        
+        # 2. Selective Gating (Channel Attention)
+        self.se_gate = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+            nn.Linear(total_filters, total_filters // 2),
+            nn.GELU(),
+            nn.Linear(total_filters // 2, total_filters),
+            nn.Sigmoid()
+        )
+        
+        # 3. Projection to d_model fingerprint
+        self.out_proj = nn.Sequential(
+            nn.Linear(total_filters, d_model),
+            nn.LayerNorm(d_model)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (N, C)
-        N, C = x.shape
-
-        x_emb = self.input_proj(x.unsqueeze(-1))   # (N, C, d_model)
-        A_exp = torch.exp(-torch.exp(self.A_log))   # (d_model, d_state) — stable decay
-
-        h = torch.zeros(N, self.d_model, self.d_state,
-                        device=x.device, dtype=x.dtype)
-        y = torch.zeros(N, self.d_model,
-                        device=x.device, dtype=x.dtype)
-
-        for k in range(C):
-            u   = x_emb[:, k, :]                            # (N, d_model)
-            B_k = self.B_proj(u)                            # (N, d_state)
-            C_k = self.C_proj(u)                            # (N, d_state)
-
-            # h = A ⊙ h  +  u ⊗ B_k
-            h = h * A_exp + u.unsqueeze(-1) * B_k.unsqueeze(1)
-
-            # y = C_k · h  (contract over d_state)
-            y = (h * C_k.unsqueeze(1)).sum(-1)              # (N, d_model)
-
-        out = y + self.D * x_emb[:, -1, :]                 # D skip
-        return self.norm(self.out_proj(out))                # (N, d_model)
+        x_1d = x.unsqueeze(1)  # (N, 1, C)
+        
+        # Extract multi-scale features
+        f_narrow = self.narrow_branch(x_1d)  # (N, F, C)
+        f_mid    = self.mid_branch(x_1d)     # (N, F, C)
+        f_wide   = self.wide_branch(x_1d)    # (N, F, C)
+        
+        # Concatenate branches
+        f_concat = torch.cat([f_narrow, f_mid, f_wide], dim=1)  # (N, 3F, C)
+        
+        # Selective Gating
+        gate = self.se_gate(f_concat).unsqueeze(-1)  # (N, 3F, 1)
+        f_gated = f_concat * gate                    # (N, 3F, C)
+        
+        # Global pool across bands to get fixed-size fingerprint
+        fingerprint_raw = f_gated.mean(dim=2)        # (N, 3F)
+        
+        # Project to final d_model dim
+        return self.out_proj(fingerprint_raw)        # (N, d_model)
 
 
 class SpectralSSMEncoder(nn.Module):

@@ -223,7 +223,7 @@ Root always gets `base_epochs`. Smaller nodes get proportionally fewer epochs �
 
 RSSP's cascade inference routes each pixel to a child node based on the parent node's argmax prediction. If the root misclassifies a pixel (even with 51% confidence), it goes to the wrong subtree permanently.
 
-The forest ensemble partially mitigates this but cannot fix a systematic routing error. SSSR replaces hard routing with **soft probabilistic routing** — pixels flow down both branches, weighted by learned spectral fingerprint similarity.
+At each internal node, the forest ensemble provides a strong base routing probability. A tiny routing head (fingerprint → p_left) then corrects this base routing when the SSM is confident. This hybrid approach replaces hard argmax routing.
 
 ### Spectral Fingerprint Encoder
 
@@ -255,9 +255,15 @@ Ground truth: `target = 1.0` if pixel ∈ left_classes, `0.0` if pixel ∈ right
 
 The head is tiny — approximately `d_model × 32 + 32 × 1 ≈ 2080` parameters per node. Negligible cost.
 
-### Soft Cascade Inference
+### Hybrid Soft Cascade Inference
 
-At each internal node, the router produces `p_left(r,c) ∈ (0,1)` per pixel. The pixel's contribution to each subtree is weighted:
+At each internal node, three modes of routing are supported:
+
+1. **Forest-only (`--routing forest`)**: The forest ensemble at the node produces local class probabilities. These are summed for the left subtree classes to produce `forest_p_left`. No SSM is used. This is pure RSSP with soft path weighting.
+2. **Soft-only (`--routing soft`)**: The router head alone determines `p_left`. This was the original SSSR implementation, but it struggles if the SSM pretraining is weak.
+3. **Hybrid (`--routing hybrid`)**: The default. `forest_p_left` provides a highly accurate base routing signal. The router head predicts `ssm_p_left`. The SSM's confidence is computed as `c = 2 × \|ssm_p_left - 0.5\|` (0 when uncertain, 1 when confident). The final routing is `p_left = forest_p_left + c × (ssm_p_left - forest_p_left)`.
+
+The pixel's contribution to each subtree is weighted:
 
 ```
 weight_left  = path_weight × p_left

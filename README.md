@@ -127,8 +127,8 @@ All results use 20% train / 10% val / 70% test stratified split.
 | Configuration | OA | mIoU |
 |---|---|---|
 | GHOST (no RSSP) | 0.8600 | 0.5100 |
-| GHOST + RSSP | 0.9072 | 0.5900 |
-| GHOST + RSSP + SSSR | *pending* | *pending* |
+| GHOST + RSSP (Forest routing) | 0.9422 | 0.6981 |
+| GHOST + RSSP + SSSR (Hybrid routing) | 0.9038 | 0.6053 |
 
 ### Pavia University (103 bands, 9 classes)
 *Note: run at half filter capacity due to 6GB VRAM constraint*
@@ -146,16 +146,28 @@ All results use 20% train / 10% val / 70% test stratified split.
 ```bash
 pip install ghost-hsi   # coming soon
 
-# Train on any hyperspectral .mat file
+# 1. Train on any hyperspectral .mat file (Full RSSP + SSSR Hybrid Routing)
 python train_rssp.py \
-    --data  path/to/data.mat \
-    --gt    path/to/labels.mat
+    --data data/indian_pines/Indian_pines_corrected.mat \
+    --gt data/indian_pines/Indian_pines_gt.mat \
+    --ssm_save ssm_ip_v2.pt \
+    --ssm_epochs 300 \
+    --epochs 300 \
+    --forests 5 \
+    --routing hybrid \
+    --save rssp_models_v2.pkl
 
-# Re-use a pretrained SSM encoder (skip SSM pretraining)
-python train_rssp.py \
-    --data     path/to/data.mat \
-    --gt       path/to/labels.mat \
-    --ssm_load ssm_pretrained.pt
+# 2. Re-use a pretrained SSM encoder & compare routing modes
+for mode in hybrid forest soft; do
+    echo "=== $mode ==="
+    python predict.py \
+        --data data/indian_pines/Indian_pines_corrected.mat \
+        --gt data/indian_pines/Indian_pines_gt.mat \
+        --model rssp_models_v2.pkl \
+        --ssm_load ssm_ip_v2.pt \
+        --routing $mode
+    echo ""
+done
 ```
 
 See [HOW_TO_USE.md](HOW_TO_USE.md) for full usage instructions.

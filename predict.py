@@ -12,18 +12,20 @@ parser = argparse.ArgumentParser(description='GHOST — Standalone Inference')
 parser.add_argument('--data',        type=str,   required=True)
 parser.add_argument('--gt',          type=str,   required=True)
 parser.add_argument('--model',       type=str,   required=True, help='Path to rssp_models.pkl')
-parser.add_argument('--ssm_load',    type=str,   required=True, help='Path to ssm_pretrained.pt')
+parser.add_argument('--ssm_load',    type=str,   default=None,
+                    help='Path to ssm_pretrained.pt (optional for --routing forest)')
 parser.add_argument('--train_ratio', type=float, default=0.2)
 parser.add_argument('--val_ratio',   type=float, default=0.1)
 parser.add_argument('--seed',        type=int,   default=42)
-parser.add_argument('--temperature', type=float, default=10.0,
-                    help='Routing sharpness: 10=near-hard (weak SSM), 1=fully soft (strong SSM). Default: 10.0')
+parser.add_argument('--routing',     type=str,   default='hybrid',
+                    choices=['hybrid', 'forest', 'soft'],
+                    help='Routing mode: hybrid (forest+SSM), forest (no SSM), soft (SSM-only)')
 
 args = parser.parse_args()
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {DEVICE}")
-print(f"Routing temperature: {args.temperature}")
+print(f"Routing mode: {args.routing}")
 
 # ── Load dataset ──────────────────────────────────────────────────────────────
 test_ds = HyperspectralDataset(
@@ -48,23 +50,41 @@ d_model        = checkpoint.get('d_model', 64)
 d_state        = checkpoint.get('d_state', 16)
 print("Models loaded.")
 
-# ── Load SSM encoder ──────────────────────────────────────────────────────────
-print(f"Loading SSM encoder from {args.ssm_load} ...")
-ssm_encoder = SpectralSSMEncoder(d_model=d_model, d_state=d_state).to(DEVICE)
-state = torch.load(args.ssm_load, map_location=DEVICE, weights_only=True)
-ssm_encoder.load_state_dict(state)
-ssm_encoder.eval()
-for p in ssm_encoder.parameters():
-    p.requires_grad_(False)
-print("SSM encoder loaded.")
+# ── Load SSM encoder (only needed for hybrid / soft routing) ──────────────────
+ssm_encoder = None
+
+if args.routing in ('hybrid', 'soft'):
+    if args.ssm_load is None:
+        # Try loading from checkpoint's embedded SSM state
+        if 'ssm_state' in checkpoint:
+            print("Loading SSM encoder from checkpoint ...")
+            ssm_encoder = SpectralSSMEncoder(d_model=d_model, d_state=d_state).to(DEVICE)
+            ssm_encoder.load_state_dict(
+                {k: v.to(DEVICE) for k, v in checkpoint['ssm_state'].items()})
+        else:
+            print("WARNING: No SSM weights found. Falling back to forest-only routing.")
+            args.routing = 'forest'
+    else:
+        print(f"Loading SSM encoder from {args.ssm_load} ...")
+        ssm_encoder = SpectralSSMEncoder(d_model=d_model, d_state=d_state).to(DEVICE)
+        state = torch.load(args.ssm_load, map_location=DEVICE, weights_only=True)
+        ssm_encoder.load_state_dict(state)
+
+    if ssm_encoder is not None:
+        ssm_encoder.eval()
+        for p in ssm_encoder.parameters():
+            p.requires_grad_(False)
+        print("SSM encoder loaded.")
+else:
+    print("Forest-only routing — SSM encoder not needed.")
 
 # ── Run inference ─────────────────────────────────────────────────────────────
-print("\n=== Running Soft Cascade Inference ===")
+print(f"\n=== Running Cascade Inference (routing={args.routing}) ===")
 final_pred = run_inference(
     tree, trained_models,
     data,
     ssm_encoder, DEVICE, num_classes,
-    temperature=args.temperature
+    routing=args.routing
 )
 
 # ── Evaluate on test pixels only ──────────────────────────────────────────────

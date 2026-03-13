@@ -59,7 +59,9 @@ Use this to establish a baseline OA and mIoU before enabling RSSP.
 python train_rssp.py \
     --data data/indian_pines/Indian_pines_corrected.mat \
     --gt   data/indian_pines/Indian_pines_gt.mat \
-    --ssm_save ssm_indian_pines.pt
+    --ssm_save ssm_indian_pines.pt \
+    --ssm_epochs 300 \
+    --routing hybrid
 ```
 
 This runs three stages automatically:
@@ -77,7 +79,22 @@ The SSM pretraining step only needs to run once per dataset. On subsequent runs,
 python train_rssp.py \
     --data     data/indian_pines/Indian_pines_corrected.mat \
     --gt       data/indian_pines/Indian_pines_gt.mat \
-    --ssm_load ssm_indian_pines.pt   # skip pretraining
+    --ssm_load ssm_indian_pines.pt \
+    --routing hybrid
+```
+
+To run inference or test alternate routing modes without retraining:
+
+```bash
+# Compare all routing modes
+for mode in hybrid forest soft; do
+    python predict.py \
+        --data data/indian_pines/Indian_pines_corrected.mat \
+        --gt data/indian_pines/Indian_pines_gt.mat \
+        --model rssp_models.pkl \
+        --ssm_load ssm_indian_pines.pt \
+        --routing $mode
+done
 ```
 
 ---

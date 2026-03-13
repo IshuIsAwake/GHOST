@@ -198,9 +198,10 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
             node        = node,
             labels      = labels,
             train_coords= train_coords,
+            val_coords  = val_coords,
             fp_map      = fp_map,
             d_model     = ssm_d_model,
-            epochs      = 50,
+            epochs      = 200,
             lr          = 1e-3,
             device      = device
         )

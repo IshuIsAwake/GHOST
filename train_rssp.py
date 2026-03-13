@@ -36,14 +36,17 @@ parser.add_argument('--d_model',      type=int,   default=64,
                     help='SSM fingerprint dimension (default: 64)')
 parser.add_argument('--d_state',      type=int,   default=16,
                     help='SSM state dimension (default: 16)')
-parser.add_argument('--ssm_epochs',   type=int,   default=100,
-                    help='SSM pre-training epochs (default: 100)')
+parser.add_argument('--ssm_epochs',   type=int,   default=300,
+                    help='SSM pre-training epochs (default: 300)')
 parser.add_argument('--ssm_lr',       type=float, default=1e-3,
                     help='SSM pre-training learning rate (default: 1e-3)')
 parser.add_argument('--ssm_save',     type=str,   default='ssm_pretrained.pt',
                     help='Path to save/load SSM weights')
 parser.add_argument('--ssm_load',     type=str,   default=None,
                     help='Load pre-trained SSM weights (skip pre-training)')
+parser.add_argument('--routing',      type=str,   default='hybrid',
+                    choices=['hybrid', 'forest', 'soft'],
+                    help='Routing mode: hybrid (forest+SSM), forest (no SSM), soft (SSM-only)')
 
 # General
 parser.add_argument('--seed',         type=int,   default=42)
@@ -155,12 +158,13 @@ with open(args.save, 'wb') as f:
 print(f"\nSaved → {args.save}")
 
 # ── Test inference ────────────────────────────────────────────────────────────
-print("\n=== Running Soft Cascade Inference ===")
+print(f"\n=== Running Cascade Inference (routing={args.routing}) ===")
 
 final_pred = run_inference(
     tree, trained_models,
     data,
-    ssm_encoder, DEVICE, num_classes
+    ssm_encoder, DEVICE, num_classes,
+    routing=args.routing
 )
 
 # Evaluate on test pixels only
