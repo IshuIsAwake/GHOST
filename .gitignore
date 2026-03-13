@@ -1,19 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.env
+.venv
+env/
+
+# Model weights and outputs
+*.pth
+*.pt
+*.pkl
+
+# Run outputs
+runs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
 # Data
 data/
 
-# Model weights
-*.pth
-*.pkl
-*.pt
+# OS
+.DS_Store
+Thumbs.db
 
-# Logs
-*.csv
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-*.egg-info/
-dist/
-build/
-.env
-
-best_results/
+# IDE
+.vscode/
+.idea/
