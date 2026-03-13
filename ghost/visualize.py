@@ -89,7 +89,7 @@ def visualize(data_chw, labels_hw, pred_hw, class_names,
 
     rgb = false_colour(data_chw, r_band, g_band, b_band)
 
-    fig, axes = plt.subplots(1, 3, figsize=(20, 7))
+    fig, axes = plt.subplots(1, 3, figsize=(20, 15))
     fig.patch.set_facecolor('#1a1a2e')
 
     panel_titles = ['False Colour Composite', 'Ground Truth Labels', 'GHOST Prediction']
