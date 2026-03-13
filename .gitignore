@@ -4,6 +4,7 @@ data/
 # Model weights
 *.pth
 *.pkl
+*.pt
 
 # Logs
 *.csv
