@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from preprocessing.continuum_removal import ContinuumRemoval
+from ghost.preprocessing.continuum_removal import ContinuumRemoval
 
 
 class SpectralSSM(nn.Module):

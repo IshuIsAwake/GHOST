@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from models.hyperspectral_net import HyperspectralNet
-from rssp.sssr_router import SSSRRouter
+from ghost.models.hyperspectral_net import HyperspectralNet
+from ghost.rssp.sssr_router import SSSRRouter
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-from preprocessing.continuum_removal import ContinuumRemoval
-from models.spectral_3d_block import Spectral3DStack
-from models.se_block import SEBlock
-from models.encoder_2d import Encoder2D
-from models.decoder_2d import Decoder2D
+from ghost.preprocessing.continuum_removal import ContinuumRemoval
+from ghost.models.spectral_3d_block import Spectral3DStack
+from ghost.models.se_block import SEBlock
+from ghost.models.encoder_2d import Encoder2D
+from ghost.models.decoder_2d import Decoder2D
 
 
 class HyperspectralNet(nn.Module):

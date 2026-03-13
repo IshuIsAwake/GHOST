@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
-from models.hyperspectral_net import HyperspectralNet
-from rssp.sssr_router import SSSRRouter, train_router
+from ghost.models.hyperspectral_net import HyperspectralNet
+from ghost.rssp.sssr_router import SSSRRouter, train_router
 
 
 class NodeDataset(Dataset):

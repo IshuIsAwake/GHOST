@@ -7,7 +7,8 @@ Step-by-step guide from raw data to segmentation results.
 ## Requirements
 
 ```bash
-pip install torch torchvision scipy numpy
+# Clone the repository and install
+pip install -e .
 ```
 
 GPU with CUDA is strongly recommended. CPU-only runs are possible but very slow.
@@ -26,7 +27,7 @@ GHOST expects `.mat` files with the following structure:
 GHOST auto-detects the correct keys inside the `.mat` file. If auto-detection fails (ambiguous keys), pass them manually:
 
 ```python
-from datasets.hyperspectral_dataset import HyperspectralDataset
+from ghost.datasets.hyperspectral_dataset import HyperspectralDataset
 
 ds = HyperspectralDataset(
     data_path  = 'data.mat',
@@ -46,9 +47,10 @@ ds = HyperspectralDataset(
 No RSSP tree, no SSSR routing. Single HyperspectralNet trained end-to-end.
 
 ```bash
-python train.py \
+ghost train \
     --data data/indian_pines/Indian_pines_corrected.mat \
-    --gt   data/indian_pines/Indian_pines_gt.mat
+    --gt   data/indian_pines/Indian_pines_gt.mat \
+    --out-dir runs/indian_pines_baseline
 ```
 
 Use this to establish a baseline OA and mIoU before enabling RSSP.
@@ -56,12 +58,13 @@ Use this to establish a baseline OA and mIoU before enabling RSSP.
 ### Option B: Full RSSP + SSSR (recommended)
 
 ```bash
-python train_rssp.py \
+ghost train_rssp \
     --data data/indian_pines/Indian_pines_corrected.mat \
     --gt   data/indian_pines/Indian_pines_gt.mat \
     --ssm_save ssm_indian_pines.pt \
     --ssm_epochs 300 \
-    --routing hybrid
+    --routing hybrid \
+    --out-dir runs/indian_pines
 ```
 
 This runs three stages automatically:
@@ -76,25 +79,33 @@ This runs three stages automatically:
 The SSM pretraining step only needs to run once per dataset. On subsequent runs, load the saved weights:
 
 ```bash
-python train_rssp.py \
+ghost train_rssp \
     --data     data/indian_pines/Indian_pines_corrected.mat \
     --gt       data/indian_pines/Indian_pines_gt.mat \
-    --ssm_load ssm_indian_pines.pt \
-    --routing hybrid
+    --ssm_load runs/indian_pines/ssm_indian_pines.pt \
+    --routing hybrid \
+    --out-dir runs/indian_pines_retrain
 ```
 
-To run inference or test alternate routing modes without retraining:
+To run inference and evaluate multiple routing modes:
 
 ```bash
-# Compare all routing modes
-for mode in hybrid forest soft; do
-    python predict.py \
-        --data data/indian_pines/Indian_pines_corrected.mat \
-        --gt data/indian_pines/Indian_pines_gt.mat \
-        --model rssp_models.pkl \
-        --ssm_load ssm_indian_pines.pt \
-        --routing $mode
-done
+# Evaluate all routing modes (default behavior)
+ghost predict \
+    --data data/indian_pines/Indian_pines_corrected.mat \
+    --gt data/indian_pines/Indian_pines_gt.mat \
+    --model runs/indian_pines/rssp_models.pkl \
+    --ssm_load runs/indian_pines/ssm_indian_pines.pt \
+    --out-dir runs/indian_pines_eval
+
+# Or select a specific one
+ghost predict \
+    --data data/indian_pines/Indian_pines_corrected.mat \
+    --gt data/indian_pines/Indian_pines_gt.mat \
+    --model runs/indian_pines/rssp_models.pkl \
+    --ssm_load runs/indian_pines/ssm_indian_pines.pt \
+    --routing forest \
+    --out-dir runs/indian_pines_eval_forest
 ```
 
 ---
@@ -131,18 +142,19 @@ Test Recall:    0.6523
 If you have limited VRAM (6GB or less), use reduced filter settings:
 
 ```bash
-python train_rssp.py \
+ghost train_rssp \
     --data        your_data.mat \
     --gt          your_labels.mat \
     --base_filters 16 \
     --num_filters  4 \
-    --d_model      32
+    --d_model      32 \
+    --out-dir     runs/my_dataset
 ```
 
 For fp16 mixed precision (saves ~40% VRAM):
 
 ```bash
-python train.py --data ... --gt ... --fp16
+ghost train --data ... --gt ... --fp16 --out-dir ...
 ```
 
 Note: `--fp16` is only available in `train.py` (flat model). RSSP training enforces fp32 at the continuum removal step regardless.

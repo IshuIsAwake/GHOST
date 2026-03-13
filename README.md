@@ -144,10 +144,10 @@ All results use 20% train / 10% val / 70% test stratified split.
 ## Quick Start
 
 ```bash
-pip install ghost-hsi   # coming soon
+pip install .
 
 # 1. Train on any hyperspectral .mat file (Full RSSP + SSSR Hybrid Routing)
-python train_rssp.py \
+ghost train_rssp \
     --data data/indian_pines/Indian_pines_corrected.mat \
     --gt data/indian_pines/Indian_pines_gt.mat \
     --ssm_save ssm_ip_v2.pt \
@@ -155,19 +155,17 @@ python train_rssp.py \
     --epochs 300 \
     --forests 5 \
     --routing hybrid \
-    --save rssp_models_v2.pkl
+    --save rssp_models_v2.pkl \
+    --out-dir runs/indian_pines
 
 # 2. Re-use a pretrained SSM encoder & compare routing modes
-for mode in hybrid forest soft; do
-    echo "=== $mode ==="
-    python predict.py \
-        --data data/indian_pines/Indian_pines_corrected.mat \
-        --gt data/indian_pines/Indian_pines_gt.mat \
-        --model rssp_models_v2.pkl \
-        --ssm_load ssm_ip_v2.pt \
-        --routing $mode
-    echo ""
-done
+# The predict command runs all routing modes by default if --routing is not provided or set to 'all'
+ghost predict \
+    --data data/indian_pines/Indian_pines_corrected.mat \
+    --gt data/indian_pines/Indian_pines_gt.mat \
+    --model runs/indian_pines/rssp_models_v2.pkl \
+    --ssm_load runs/indian_pines/ssm_ip_v2.pt \
+    --out-dir runs/indian_pines_test
 ```
 
 See [HOW_TO_USE.md](HOW_TO_USE.md) for full usage instructions.
@@ -178,28 +176,15 @@ See [HOW_TO_USE.md](HOW_TO_USE.md) for full usage instructions.
 
 ```
 GHOST/
-├── models/
-│   ├── hyperspectral_net.py   # Full pipeline model
-│   ├── spectral_3d_block.py   # 3D conv spectral stack
-│   ├── spectral_ssm.py        # SSSR fingerprint encoder
-│   ├── se_block.py            # Squeeze-and-excitation block
-│   ├── encoder_2d.py          # U-Net encoder
-│   └── decoder_2d.py          # U-Net decoder
-├── preprocessing/
-│   └── continuum_removal.py   # Physics-informed preprocessing
-├── datasets/
-│   └── hyperspectral_dataset.py  # Universal .mat loader
-├── rssp/
-│   ├── sam_clustering.py      # SAM-based tree builder
-│   ├── rssp_trainer.py        # Node + router training
-│   ├── rssp_inference.py      # Soft cascade inference
-│   ├── ssm_pretrain.py        # SSM encoder pretraining
-│   └── sssr_router.py         # Per-node routing heads
-├── train.py                   # Flat model training
-├── train_rssp.py              # RSSP + SSSR training
-└── docs/
-    ├── README.md
-    ├── ARCHITECTURE.md
-    ├── PARAMETERS.md
-    └── HOW_TO_USE.md
+├── ghost/
+│   ├── models/                # Full pipeline models (HyperspectralNet, spectral 3D blocks)
+│   ├── preprocessing/         # Physics-informed preprocessing (Continuum Removal)
+│   ├── datasets/              # Universal .mat loader (HyperspectralDataset)
+│   ├── rssp/                  # Recursive Spectral Splitting and Routing modules
+│   ├── train.py               # Flat model training entry point
+│   ├── train_rssp.py          # RSSP + SSSR training entry point
+│   ├── predict.py             # Inference entry point
+│   └── cli.py                 # Terminal router for the `ghost` command
+├── setup.py                   # Packaging metadata
+└── docs/                      # Documentation
 ```

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from models.spectral_ssm import SpectralSSMEncoder
+from ghost.models.spectral_ssm import SpectralSSMEncoder
 
 
 def pretrain_ssm(data, labels, train_coords, val_coords,
