@@ -117,9 +117,19 @@ def main():
 
     # ── Pre-compute fingerprint map (once for the full image) ─────────────────────
     print("\nPre-computing fingerprint map ...")
+    C, H, W = data.shape
+    fp_map = torch.zeros(H, W, args.d_model)
+    chunk_size = 32  # process 32 rows at a time
+
     with torch.no_grad():
-        fp_4d  = ssm_encoder(data.unsqueeze(0).to(DEVICE))         # (1, d_model, H, W)
-        fp_map = fp_4d.squeeze(0).permute(1, 2, 0).cpu()           # (H, W, d_model)
+        for row_start in range(0, H, chunk_size):
+            row_end = min(row_start + chunk_size, H)
+            chunk = data[:, row_start:row_end, :].unsqueeze(0).to(DEVICE)
+            fp_chunk = ssm_encoder(chunk).squeeze(0).permute(1, 2, 0).cpu()
+            fp_map[row_start:row_end, :, :] = fp_chunk
+            del chunk, fp_chunk
+            torch.cuda.empty_cache()
+
     print(f"Fingerprint map shape: {tuple(fp_map.shape)}")
 
     # ── Build RSSP tree ───────────────────────────────────────────────────────────
