@@ -1,4 +1,4 @@
-# GHOST — General Hyperspectral Out-of-the-box Segmentation Tool
+# GHOST — General Hyperspectral Observation and Segmentation Tool
 
 > *"We are not building a `dataset002_BraTS` or a `dataset004_Hippocampus`. We are building the nnUNet itself."*
 
