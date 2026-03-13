@@ -53,8 +53,12 @@ def main():
     # General
     parser.add_argument('--seed',         type=int,   default=42)
     parser.add_argument('--save',         type=str,   default='rssp_models.pkl')
+    parser.add_argument('--out-dir',      type=str,   default='.',
+                        help='Output directory to save weights and logs')
 
     args = parser.parse_args()
+    
+    os.makedirs(args.out_dir, exist_ok=True)
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
@@ -91,6 +95,7 @@ def main():
         state = torch.load(args.ssm_load, map_location=DEVICE, weights_only=True)
         ssm_encoder.load_state_dict(state)
     else:
+        print(f"SSM will be saved to: {os.path.join(args.out_dir, args.ssm_save)}")
         ssm_encoder = pretrain_ssm(
             data         = data,
             labels       = labels,
@@ -102,7 +107,7 @@ def main():
             epochs       = args.ssm_epochs,
             lr           = args.ssm_lr,
             device       = str(DEVICE),
-            save_path    = args.ssm_save
+            save_path    = os.path.join(args.out_dir, args.ssm_save)
         )
 
     # Freeze SSM — it is shared across all nodes and never updated again
@@ -149,7 +154,7 @@ def main():
     )
 
     # Save everything needed for inference
-    with open(args.save, 'wb') as f:
+    with open(os.path.join(args.out_dir, args.save), 'wb') as f:
         pickle.dump({
             'trained_models': trained_models,
             'tree':           tree,
@@ -157,7 +162,7 @@ def main():
             'd_model':        args.d_model,
             'd_state':        args.d_state,
         }, f)
-    print(f"\nSaved → {args.save}")
+    print(f"\nSaved → {os.path.join(args.out_dir, args.save)}")
 
     # ── Test inference ────────────────────────────────────────────────────────────
     print(f"\n=== Running Cascade Inference (routing={args.routing}) ===")
