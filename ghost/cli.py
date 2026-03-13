@@ -27,6 +27,11 @@ def main():
         from ghost.predict import main as run_predict
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         run_predict()
+
+    elif args.command == 'visualize':
+        from ghost.visualize import main as run_visualize
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        run_visualize()
         
     else:
         print("Unrecognized command")
