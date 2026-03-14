@@ -172,7 +172,7 @@ def main():
             'd_model':        args.d_model,
             'd_state':        args.d_state,
         }, f)
-    print(f"\nSaved → {os.path.join(args.out_dir, args.save)}")
+    print(f"\nSaved -> {os.path.join(args.out_dir, args.save)}")
 
     # ── Test inference ────────────────────────────────────────────────────────────
     print(f"\n=== Running Cascade Inference (routing={args.routing}) ===")

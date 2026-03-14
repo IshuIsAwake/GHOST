@@ -126,6 +126,6 @@ def pretrain_ssm(data, labels, train_coords, val_coords,
 
     encoder.load_state_dict({k: v.to(device) for k, v in best_state.items()})
     torch.save(best_state, save_path)
-    print(f"\nSSM pre-trained | Best Val Acc: {best_val_acc:.4f} | Saved → {save_path}")
+    print(f"\nSSM pre-trained | Best Val Acc: {best_val_acc:.4f} | Saved -> {save_path}")
 
     return encoder

@@ -246,8 +246,8 @@ def print_tree(node, indent=0):
     classes = node['classes']
     print(f"{prefix}Node (depth {node['depth']}): classes {classes}")
     if node['left']:
-        print(f"{prefix}  ├── LEFT:")
+        print(f"{prefix}  +-- LEFT:")
         print_tree(node['left'],  indent + 2)
     if node['right']:
-        print(f"{prefix}  └── RIGHT:")
+        print(f"{prefix}  +-- RIGHT:")
         print_tree(node['right'], indent + 2)

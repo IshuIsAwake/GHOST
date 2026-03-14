@@ -126,7 +126,7 @@ def visualize(data_chw, labels_hw, pred_hw, class_names,
     if save_path:
         plt.savefig(save_path, dpi=180, bbox_inches='tight',
                     facecolor=fig.get_facecolor())
-        print(f"Saved → {save_path}")
+        print(f"Saved -> {save_path}")
 
     plt.show()
 
