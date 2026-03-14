@@ -220,5 +220,3 @@ Indian Pines at full capacity: ~60-70 minutes on RTX 3050.
 | [Roadmap](docs/roadmap.md) | Near-term and long-term plans |
 
 ---
-
-*Built at [Hackathon Name] · GHOST sees what others miss.*
