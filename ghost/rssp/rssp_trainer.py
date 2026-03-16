@@ -1,10 +1,36 @@
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from ghost.models.hyperspectral_net import HyperspectralNet
+from ghost.models.losses import build_criterion
 from ghost.rssp.sssr_router import SSSRRouter, train_router
+from ghost.utils.display import (
+    epoch_bar, forest_banner, node_banner, forest_done_line,
+    BOLD, RESET, CYAN, GRAY, GREEN
+)
+
+
+def _vram_str(device: str) -> str:
+    """Return peak VRAM usage since last reset. Meaningful even after model deletion."""
+    if torch.cuda.is_available() and device != 'cpu':
+        peak = torch.cuda.max_memory_allocated() / 1024 ** 3
+        return f"{peak:.2f} GB peak"
+    return "N/A (CPU)"
+
+
+def _elapsed_str(start: float) -> str:
+    """Return elapsed time as Xh Ym Zs string."""
+    secs  = int(time.time() - start)
+    h, r  = divmod(secs, 3600)
+    m, s  = divmod(r, 60)
+    if h > 0:
+        return f"{h}h {m}m {s}s"
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
 class NodeDataset(Dataset):
@@ -37,18 +63,19 @@ class NodeDataset(Dataset):
 
 
 def compute_node_metrics(pred, target, num_classes):
-    """Compute OA, mIoU, Dice, Precision, Recall for a single node prediction."""
+    """Compute OA, mIoU, Dice, Precision, Recall, AA, kappa for a single node prediction."""
     pred     = pred.argmax(dim=1)
     mask     = target != 0
     pred_m   = pred[mask]
     target_m = target[mask]
 
     if target_m.numel() == 0:
-        return 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
-    oa = (pred_m == target_m).sum().item() / target_m.numel()
+    n  = target_m.numel()
+    oa = (pred_m == target_m).sum().item() / n
 
-    ious, dices, precisions, recalls = [], [], [], []
+    ious, dices, precisions, recalls, per_class_acc = [], [], [], [], []
 
     for c in range(1, num_classes):
         pred_c   = pred_m == c
@@ -62,13 +89,25 @@ def compute_node_metrics(pred, target, num_classes):
             dices.append((2 * tp) / (2 * tp + fp + fn + 1e-8))
             precisions.append(tp / (tp + fp + 1e-8))
             recalls.append(tp / (tp + fn + 1e-8))
+        if target_c.sum().item() > 0:
+            per_class_acc.append(tp / target_c.sum().item())
 
-    miou      = sum(ious)       / len(ious)       if ious       else 0.0
-    dice      = sum(dices)      / len(dices)      if dices      else 0.0
-    precision = sum(precisions) / len(precisions) if precisions else 0.0
-    recall    = sum(recalls)    / len(recalls)    if recalls    else 0.0
+    miou      = sum(ious)          / len(ious)          if ious          else 0.0
+    dice      = sum(dices)         / len(dices)         if dices         else 0.0
+    precision = sum(precisions)    / len(precisions)    if precisions    else 0.0
+    recall    = sum(recalls)       / len(recalls)       if recalls       else 0.0
+    aa        = sum(per_class_acc) / len(per_class_acc) if per_class_acc else 0.0
 
-    return oa, miou, dice, precision, recall
+    # Cohen's kappa
+    po     = oa
+    pe_sum = 0.0
+    for c in range(1, num_classes):
+        p_pred   = (pred_m == c).sum().item() / n
+        p_target = (target_m == c).sum().item() / n
+        pe_sum  += p_pred * p_target
+    kappa = (po - pe_sum) / (1 - pe_sum + 1e-10) if (1 - pe_sum) > 1e-10 else 0.0
+
+    return oa, miou, dice, precision, recall, aa, kappa
 
 
 def get_node_epochs(base_epochs, node_classes, total_classes):
@@ -78,42 +117,48 @@ def get_node_epochs(base_epochs, node_classes, total_classes):
 
 
 def train_node(node, data, labels, total_classes, train_coords, val_coords,
-               fp_map,                  # (H, W, d_model) CPU tensor — pre-computed
-               ssm_d_model: int = 64,   # must match encoder's d_model
+               fp_map,
+               ssm_d_model: int = 64,
                base_epochs=300, num_forests=5, base_filters=32,
                num_filters=8, num_blocks=3, lr=1e-4, device='cuda',
-               node_id='root'):
+               node_id='root',
+               loss_type: str = 'ce', focal_gamma: float = 2.0,
+               global_start: float = None):
     """
     Train forest ensemble + SSSR routing head for one RSSP node.
 
-    Returns a structured dict:
-    {
-        'forests':      list of model state dicts (one per forest member),
-        'router_state': SSSRRouter state dict or None (None for leaf nodes),
-        'node_classes', 'num_classes', 'num_bands',
-        'num_filters', 'num_blocks', 'base_filters', 'd_model'
-    }
+    loss_type:    'ce' | 'squared_ce' | 'focal'
+    focal_gamma:  gamma for focal loss
+    global_start: time.time() from the very start of train_tree — used to show
+                  total elapsed wall-clock time across all nodes.
     """
-    node_classes = node['classes']
-    num_classes  = len(node_classes) + 1
-    num_bands    = data.shape[0]
-    epochs       = get_node_epochs(base_epochs, node_classes, total_classes)
+    node_classes  = node['classes']
+    num_classes   = len(node_classes) + 1
+    num_bands     = data.shape[0]
+    epochs        = get_node_epochs(base_epochs, node_classes, total_classes)
+    node_start    = time.time()
+    if global_start is None:
+        global_start = node_start
 
-    print(f"\n{'='*60}")
-    print(f"Node '{node_id}'")
-    print(f"  Classes:       {node_classes}")
-    print(f"  Local classes: {num_classes - 1}")
-    print(f"  Epochs:        {epochs}")
-    print(f"  Forests:       {num_forests}")
+    if torch.cuda.is_available() and device != 'cpu':
+        torch.cuda.reset_peak_memory_stats()  # fresh peak counter per node
 
     train_ds = NodeDataset(data, labels, node_classes, train_coords)
     val_ds   = NodeDataset(data, labels, node_classes, val_coords)
 
-    print(f"  Train pixels:  {train_ds.num_pixels}")
-    print(f"  Val pixels:    {val_ds.num_pixels}")
+    print(node_banner(node_id, node_classes, num_classes, epochs,
+                      num_forests, loss_type, focal_gamma,
+                      train_ds.num_pixels, val_ds.num_pixels))
 
     train_loader = DataLoader(train_ds, batch_size=1, shuffle=False)
     val_loader   = DataLoader(val_ds,   batch_size=1, shuffle=False)
+
+    # Build criterion once per node
+    criterion = build_criterion(
+        loss_type   = loss_type,
+        focal_gamma = focal_gamma,
+        ignore_index= 0
+    )
 
     forest_models = []
 
@@ -123,7 +168,7 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
         torch.cuda.manual_seed(seed)
         np.random.seed(seed)
 
-        print(f"\n  --- Forest {forest_idx+1}/{num_forests} (seed={seed}) ---")
+        print(forest_banner(forest_idx, num_forests, seed, node_id))
 
         model = HyperspectralNet(
             num_bands    = num_bands,
@@ -133,13 +178,15 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
             base_filters = base_filters
         ).to(device)
 
-        criterion = nn.CrossEntropyLoss(ignore_index=0)
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, patience=10, factor=0.5)
 
         best_val_miou = 0.0
         best_state    = None
+        # Initialise val metrics so they're always bound even before first checkpoint
+        v_loss = float('inf')
+        val_oa = val_miou = val_dice = val_prec = val_rec = val_aa = val_kappa = 0.0
 
         for epoch in range(1, epochs + 1):
             model.train()
@@ -159,12 +206,16 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
                         d, l   = d.to(device), l.to(device)
                         out    = model(d)
                         v_loss = criterion(out, l).item()
-                        val_oa, val_miou, val_dice, val_prec, val_rec = compute_node_metrics(
-                            out.cpu(), l.cpu(), num_classes)
+                        val_oa, val_miou, val_dice, val_prec, val_rec, val_aa, val_kappa = \
+                            compute_node_metrics(out.cpu(), l.cpu(), num_classes)
 
-                print(f"  Epoch {epoch:3d} | Loss: {loss:.4f} | Val Loss: {v_loss:.4f} | "
-                      f"OA: {val_oa:.4f} | mIoU: {val_miou:.4f} | "
-                      f"Dice: {val_dice:.4f} | Prec: {val_prec:.4f} | Rec: {val_rec:.4f}")
+                epoch_bar(epoch, epochs, loss.item(),
+                          val_loss=v_loss,
+                          oa=val_oa, miou=val_miou,
+                          aa=val_aa, kappa=val_kappa,
+                          interval=20)
+            else:
+                epoch_bar(epoch, epochs, loss.item(), interval=20)
 
                 if val_miou > best_val_miou:
                     best_val_miou = val_miou
@@ -175,7 +226,10 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
             best_state = {k: v.cpu().clone()
                           for k, v in model.state_dict().items()}
 
-        print(f"  Forest {forest_idx+1} done | Best Val mIoU: {best_val_miou:.4f}")
+        print(forest_done_line(forest_idx, num_forests, best_val_miou,
+                               _elapsed_str(node_start),
+                               _elapsed_str(global_start),
+                               _vram_str(device)))
 
         forest_models.append({
             'state_dict':      best_state,
@@ -229,11 +283,16 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
                ssm_d_model: int = 64,
                base_epochs=300, num_forests=5, base_filters=32,
                num_filters=8, num_blocks=3, lr=1e-4, device='cuda',
-               node_id='root'):
+               node_id='root',
+               loss_type: str = 'ce', focal_gamma: float = 2.0,
+               global_start: float = None):
     """
     Recursively train all RSSP tree nodes.
-    Returns: dict mapping node_id → node training result dict.
+    global_start: set once at root, passed to every node for total elapsed display.
     """
+    if global_start is None:
+        global_start = time.time()
+
     trained = {}
 
     trained[node_id] = train_node(
@@ -241,7 +300,9 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
         train_coords, val_coords,
         fp_map, ssm_d_model,
         base_epochs, num_forests, base_filters,
-        num_filters, num_blocks, lr, device, node_id
+        num_filters, num_blocks, lr, device, node_id,
+        loss_type=loss_type, focal_gamma=focal_gamma,
+        global_start=global_start
     )
 
     if tree['left'] and len(tree['left']['classes']) > 1:
@@ -251,7 +312,9 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
             fp_map, ssm_d_model,
             base_epochs, num_forests, base_filters,
             num_filters, num_blocks, lr, device,
-            node_id=node_id + '_L'
+            node_id=node_id + '_L',
+            loss_type=loss_type, focal_gamma=focal_gamma,
+            global_start=global_start
         ))
 
     if tree['right'] and len(tree['right']['classes']) > 1:
@@ -261,7 +324,9 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
             fp_map, ssm_d_model,
             base_epochs, num_forests, base_filters,
             num_filters, num_blocks, lr, device,
-            node_id=node_id + '_R'
+            node_id=node_id + '_R',
+            loss_type=loss_type, focal_gamma=focal_gamma,
+            global_start=global_start
         ))
 
     return trained

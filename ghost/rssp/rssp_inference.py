@@ -11,13 +11,6 @@ from ghost.rssp.sssr_router import SSSRRouter
 
 def get_global_soft_probs(node_info: dict, data: torch.Tensor,
                           device, num_global_classes: int) -> torch.Tensor:
-    """
-    Run the forest ensemble for one node.
-    Averages softmax probabilities across all forest members.
-    Maps local class IDs → global class IDs.
-
-    Returns: (B, num_global_classes, H, W) on CPU
-    """
     forests         = node_info['forests']
     local_to_global = forests[0]['local_to_global']
     B, _, H, W      = data.shape
@@ -43,15 +36,14 @@ def get_global_soft_probs(node_info: dict, data: torch.Tensor,
         if device != 'cpu':
             torch.cuda.empty_cache()
 
-    prob_avg = prob_sum / len(forests)                      # (B, local_classes, H, W)
+    prob_avg = prob_sum / len(forests)
 
-    # Remap to global class space
     global_probs = torch.zeros(B, num_global_classes, H, W)
     for local_id, global_id in local_to_global.items():
         if global_id < num_global_classes:
             global_probs[:, global_id] = prob_avg[:, local_id]
 
-    return global_probs                                      # CPU
+    return global_probs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,17 +53,6 @@ def get_global_soft_probs(node_info: dict, data: torch.Tensor,
 def forest_routing_prob(node_probs: torch.Tensor,
                         left_classes: list,
                         num_global_classes: int) -> torch.Tensor:
-    """
-    Derive p_left from the forest ensemble's own predictions.
-
-    Sum the probability mass the forest assigns to left-child classes.
-    This is the forest's opinion on "does this pixel belong to the left subtree?"
-
-    node_probs:  (B, num_global_classes, H, W) — forest ensemble prediction
-    left_classes: list of global class IDs in the left child
-
-    Returns: (B, 1, H, W) — p_left ∈ [0, 1]
-    """
     B, G, H, W = node_probs.shape
     p_left = torch.zeros(B, 1, H, W)
     for c in left_classes:
@@ -81,7 +62,7 @@ def forest_routing_prob(node_probs: torch.Tensor,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Soft cascade inference — hybrid forest+SSM routing
+# Soft cascade inference
 # ─────────────────────────────────────────────────────────────────────────────
 
 def cascade_soft_inference(tree: dict,
@@ -94,33 +75,16 @@ def cascade_soft_inference(tree: dict,
                            path_weight: torch.Tensor = None,
                            fingerprints: torch.Tensor = None,
                            routing: str = 'hybrid') -> torch.Tensor:
-    """
-    Soft-routed RSSP cascade inference with three routing modes:
-
-      'hybrid'  — forest prediction as base, SSM corrects when confident (default)
-      'forest'  — forest-only soft routing, no SSM used
-      'soft'    — SSM-only routing (original SSSR behavior)
-
-    The hybrid mode naturally degrades to forest-only when SSM confidence
-    is low — so SSSR is purely additive. Worst case = same as forest routing.
-
-    path_weight:  (B, 1, H, W) cumulative routing weight along this branch.
-    fingerprints: (B, d_model, H, W) pre-computed once at root, passed down.
-
-    Returns: (B, num_global_classes, H, W) weighted probability tensor on CPU.
-    """
     B, _, H, W = data.shape
 
-    # ── Compute fingerprints once at root (only when SSM is used) ─────────────
     if fingerprints is None and routing in ('hybrid', 'soft'):
         ssm_encoder.eval()
         with torch.no_grad():
-            fingerprints = ssm_encoder(data.to(device)).cpu()  # (B, d_model, H, W)
+            fingerprints = ssm_encoder(data.to(device)).cpu()
 
     if path_weight is None:
         path_weight = torch.ones(B, 1, H, W)
 
-    # ── Single-class leaf: no model trained, trivial prediction ──────────────
     if node_id not in trained_models:
         classes      = tree['classes']
         global_probs = torch.zeros(B, num_global_classes, H, W)
@@ -130,33 +94,27 @@ def cascade_soft_inference(tree: dict,
 
     node_info  = trained_models[node_id]
     node_probs = get_global_soft_probs(
-        node_info, data, device, num_global_classes)           # (B, G, H, W) CPU
+        node_info, data, device, num_global_classes)
 
-    # ── Structural leaf: no children in tree ─────────────────────────────────
     if tree['left'] is None and tree['right'] is None:
         return node_probs * path_weight
-
-    # ── Internal node: compute routing probabilities ─────────────────────────
 
     left_classes = tree['left']['classes']
 
     if routing == 'forest':
-        # Pure forest-derived routing — no SSM at all
         p_left = forest_routing_prob(node_probs, left_classes, num_global_classes)
 
     elif routing == 'soft':
-        # Pure SSM routing (original SSSR behavior)
         router = SSSRRouter(d_model=node_info['d_model'])
         if node_info['router_state'] is not None:
             router.load_state_dict(node_info['router_state'])
         router.eval()
         with torch.no_grad():
-            p_left = router(fingerprints).unsqueeze(1)         # (B, 1, H, W)
+            p_left = router(fingerprints).unsqueeze(1)
 
     elif routing == 'hybrid':
-        # Hybrid: forest as base, SSM corrects when confident
         f_p_left = forest_routing_prob(
-            node_probs, left_classes, num_global_classes)      # (B, 1, H, W)
+            node_probs, left_classes, num_global_classes)
 
         router = SSSRRouter(d_model=node_info['d_model'])
         if node_info['router_state'] is not None:
@@ -164,13 +122,9 @@ def cascade_soft_inference(tree: dict,
         router.eval()
 
         with torch.no_grad():
-            ssm_p_left = router(fingerprints).unsqueeze(1)     # (B, 1, H, W)
+            ssm_p_left = router(fingerprints).unsqueeze(1)
 
-        # SSM confidence: 0 when p=0.5 (uncertain), 1 when p=0 or p=1 (confident)
         ssm_confidence = (2.0 * (ssm_p_left - 0.5).abs()).clamp(0, 1)
-
-        # Confidence-gated hybrid: trust forest as base, let SSM correct
-        # when confident.  When SSM sucks → low confidence → pure forest routing
         p_left = f_p_left + ssm_confidence * (ssm_p_left - f_p_left)
         p_left = p_left.clamp(1e-6, 1 - 1e-6)
 
@@ -178,10 +132,8 @@ def cascade_soft_inference(tree: dict,
         raise ValueError(f"Unknown routing mode: '{routing}'. Use 'hybrid', 'forest', or 'soft'.")
 
     p_right = 1.0 - p_left
+    result  = torch.zeros(B, num_global_classes, H, W)
 
-    result = torch.zeros(B, num_global_classes, H, W)
-
-    # ── Left subtree ─────────────────────────────────────────────────────────
     if tree['left'] is not None:
         left_id = node_id + '_L'
         result += cascade_soft_inference(
@@ -190,7 +142,6 @@ def cascade_soft_inference(tree: dict,
             path_weight * p_left, fingerprints, routing
         )
 
-    # ── Right subtree ────────────────────────────────────────────────────────
     if tree['right'] is not None:
         right_id = node_id + '_R'
         result += cascade_soft_inference(
@@ -203,43 +154,61 @@ def cascade_soft_inference(tree: dict,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Final prediction and metrics
+# Final prediction
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_inference(tree, trained_models, data, ssm_encoder, device,
                   num_global_classes, routing: str = 'hybrid') -> np.ndarray:
-    """
-    Runs cascade_soft_inference and returns argmax prediction.
-
-    routing: 'hybrid'  — forest + SSM hybrid (default, recommended)
-             'forest'  — forest-only soft routing (no SSM)
-             'soft'    — SSM-only routing (original SSSR)
-
-    Returns: (H, W) numpy array of predicted global class IDs.
-    """
     with torch.no_grad():
         weighted_probs = cascade_soft_inference(
             tree, trained_models,
             data.unsqueeze(0) if data.dim() == 3 else data,
             ssm_encoder, device, num_global_classes,
             routing=routing
-        )                                                       # (1, G, H, W)
+        )
 
-    pred = weighted_probs.squeeze(0).argmax(dim=0).numpy()     # (H, W)
+    pred = weighted_probs.squeeze(0).argmax(dim=0).numpy()
     return pred
+
+
+def per_class_iou(pred: np.ndarray,
+                  labels_np: np.ndarray,
+                  num_classes: int) -> dict:
+    """
+    Per-class IoU over labeled pixels only.
+    Returns dict: {class_id: iou_float}  (classes with zero ground-truth pixels are omitted)
+    """
+    mask     = labels_np > 0
+    pred_m   = pred[mask]
+    target_m = labels_np[mask]
+    result   = {}
+    for c in range(1, num_classes):
+        pred_c   = pred_m == c
+        target_c = target_m == c
+        tp    = (pred_c & target_c).sum()
+        fp    = (pred_c & ~target_c).sum()
+        fn    = (~pred_c & target_c).sum()
+        union = tp + fp + fn
+        if target_c.sum() > 0:
+            result[c] = float(tp / union) if union > 0 else 0.0
+    return result
 
 
 def compute_rssp_metrics(pred: np.ndarray,
                          labels_np: np.ndarray,
                          num_classes: int):
-    """OA, mIoU, Dice, Precision, Recall over labeled pixels only."""
+    """
+    OA, mIoU, Dice, Precision, Recall, AA, kappa over labeled pixels only.
+    Returns: (oa, miou, dice, precision, recall, aa, kappa)
+    """
     mask     = labels_np > 0
     pred_m   = pred[mask]
     target_m = labels_np[mask]
+    n        = target_m.size
 
-    oa = (pred_m == target_m).sum() / target_m.size
+    oa = (pred_m == target_m).sum() / n
 
-    ious, dices, precisions, recalls = [], [], [], []
+    ious, dices, precisions, recalls, per_class_acc = [], [], [], [], []
 
     for c in range(1, num_classes):
         pred_c   = pred_m == c
@@ -253,10 +222,22 @@ def compute_rssp_metrics(pred: np.ndarray,
             dices.append((2 * tp) / (2 * tp + fp + fn + 1e-8))
             precisions.append(tp / (tp + fp + 1e-8))
             recalls.append(tp / (tp + fn + 1e-8))
+        if target_c.sum() > 0:
+            per_class_acc.append(tp / target_c.sum())
 
-    miou      = sum(ious)       / len(ious)       if ious       else 0.0
-    dice      = sum(dices)      / len(dices)      if dices      else 0.0
-    precision = sum(precisions) / len(precisions) if precisions else 0.0
-    recall    = sum(recalls)    / len(recalls)    if recalls    else 0.0
+    miou      = sum(ious)          / len(ious)          if ious          else 0.0
+    dice      = sum(dices)         / len(dices)         if dices         else 0.0
+    precision = sum(precisions)    / len(precisions)    if precisions    else 0.0
+    recall    = sum(recalls)       / len(recalls)       if recalls       else 0.0
+    aa        = sum(per_class_acc) / len(per_class_acc) if per_class_acc else 0.0
 
-    return float(oa), float(miou), float(dice), float(precision), float(recall)
+    # Cohen's kappa
+    po     = float(oa)
+    pe_sum = 0.0
+    for c in range(1, num_classes):
+        p_pred   = (pred_m == c).sum() / n
+        p_target = (target_m == c).sum() / n
+        pe_sum  += float(p_pred) * float(p_target)
+    kappa = (po - pe_sum) / (1 - pe_sum + 1e-10) if (1 - pe_sum) > 1e-10 else 0.0
+
+    return float(oa), float(miou), float(dice), float(precision), float(recall), float(aa), float(kappa)

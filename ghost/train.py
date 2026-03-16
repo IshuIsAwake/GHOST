@@ -6,6 +6,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from ghost.datasets.hyperspectral_dataset import HyperspectralDataset
 from ghost.models.hyperspectral_net import HyperspectralNet
+from ghost.models.losses import build_criterion
+from ghost.utils.display import (
+    print_training_start, print_training_done,
+    print_results_box, epoch_bar
+)
 import csv
 import numpy as np
 
@@ -29,8 +34,17 @@ def main():
     parser.add_argument('--lr',     type=float, default=1e-4, help='Learning rate (default: 1e-4)')
     parser.add_argument('--seed',   type=int,   default=42,   help='Random seed (default: 42)')
 
+    # Loss
+    parser.add_argument('--loss',        type=str,   default='ce',
+                        choices=['ce', 'squared_ce', 'focal'],
+                        help='Loss function (default: ce). '
+                             'squared_ce: CE squared, amplifies hard-example penalty. '
+                             'focal: focal loss with --focal_gamma.')
+    parser.add_argument('--focal_gamma', type=float, default=2.0,
+                        help='Focal loss gamma — higher values focus more on hard examples (default: 2.0)')
+
     # Precision
-    parser.add_argument('--fp16', action='store_true', help='Use mixed precision (float16) training — faster, lower VRAM, minor performance tradeoff')
+    parser.add_argument('--fp16', action='store_true', help='Use mixed precision (float16) training')
 
     # Output
     parser.add_argument('--out-dir', type=str, default='.', help='Output directory')
@@ -66,10 +80,17 @@ def main():
     ).to(DEVICE)
 
     print(f"Training on {DEVICE} | {'fp16 (mixed precision)' if args.fp16 else 'fp32 (full precision)'}")
-    print(f"Bands: {train_ds.num_bands} | Classes: {train_ds.num_classes} | Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
+    print(f"Bands: {train_ds.num_bands} | Classes: {train_ds.num_classes} | Parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Loss: {args.loss}" + (f" | gamma={args.focal_gamma}" if 'focal' in args.loss else "") + "\n")
 
-    # ── Loss, optimizer, scheduler ────────────────────────────────────────────────
-    criterion = nn.CrossEntropyLoss(ignore_index=0)
+    # ── Loss ──────────────────────────────────────────────────────────────────────
+    criterion = build_criterion(
+        loss_type   = args.loss,
+        focal_gamma = args.focal_gamma,
+        ignore_index= 0
+    )
+
+    # ── Optimizer, scheduler ──────────────────────────────────────────────────────
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
     scaler    = torch.amp.GradScaler('cuda', enabled=args.fp16)
@@ -83,7 +104,7 @@ def main():
 
         oa = (pred_m == target_m).sum().item() / target_m.numel()
 
-        ious, dices, precisions, recalls = [], [], [], []
+        ious, dices, precisions, recalls, per_class_acc = [], [], [], [], []
         for c in range(1, num_classes):
             pred_c   = pred_m == c
             target_c = target_m == c
@@ -96,20 +117,37 @@ def main():
                 dices.append((2 * tp) / (2 * tp + fp + fn + 1e-8))
                 precisions.append(tp / (tp + fp + 1e-8))
                 recalls.append(tp / (tp + fn + 1e-8))
+            if target_c.sum() > 0:
+                per_class_acc.append(tp / target_c.sum().item())
 
-        miou      = sum(ious)       / len(ious)       if ious       else 0
-        dice      = sum(dices)      / len(dices)      if dices      else 0
-        precision = sum(precisions) / len(precisions) if precisions else 0
-        recall    = sum(recalls)    / len(recalls)    if recalls    else 0
+        miou      = sum(ious)           / len(ious)           if ious           else 0
+        dice      = sum(dices)          / len(dices)          if dices          else 0
+        precision = sum(precisions)     / len(precisions)     if precisions     else 0
+        recall    = sum(recalls)        / len(recalls)        if recalls        else 0
+        aa        = sum(per_class_acc)  / len(per_class_acc)  if per_class_acc  else 0
 
-        return oa, miou, dice, precision, recall
+        # Cohen's kappa
+        n        = target_m.numel()
+        po       = oa
+        pe_sum   = 0.0
+        for c in range(1, num_classes):
+            p_pred   = (pred_m == c).sum().item() / n
+            p_target = (target_m == c).sum().item() / n
+            pe_sum  += p_pred * p_target
+        kappa = (po - pe_sum) / (1 - pe_sum + 1e-10) if (1 - pe_sum) > 1e-10 else 0.0
+
+        return oa, miou, dice, precision, recall, aa, kappa
 
     # ── Training loop ─────────────────────────────────────────────────────────────
+    os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, args.log), 'w', newline='') as f:
-        csv.writer(f).writerow(['epoch', 'train_loss', 'val_loss', 'val_oa', 'val_miou', 'val_dice', 'val_precision', 'val_recall'])
+        csv.writer(f).writerow(['epoch', 'train_loss', 'val_loss', 'val_oa', 'val_miou',
+                                 'val_dice', 'val_precision', 'val_recall', 'val_aa', 'val_kappa'])
 
+    print_training_start()
     best_val_miou = 0
     best_epoch    = 0
+    val_loss = val_oa = val_miou = val_dice = val_precision = val_recall = val_aa = val_kappa = 0.0
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -135,13 +173,22 @@ def main():
                     with torch.autocast('cuda', enabled=args.fp16):
                         output   = model(data)
                         val_loss = criterion(output, labels)
-                    val_oa, val_miou, val_dice, val_precision, val_recall = compute_metrics(output, labels, train_ds.num_classes)
+                    val_oa, val_miou, val_dice, val_precision, val_recall, val_aa, val_kappa = \
+                        compute_metrics(output, labels, train_ds.num_classes)
 
-            print(f"Epoch {epoch:3d} | Loss: {loss:.4f} | Val Loss: {val_loss:.4f} | Val OA: {val_oa:.4f} | Val mIoU: {val_miou:.4f} | Dice: {val_dice:.4f}")
+            epoch_bar(epoch, args.epochs, loss.item(),
+                      val_loss=val_loss.item(),
+                      oa=val_oa, miou=val_miou,
+                      aa=val_aa, kappa=val_kappa,
+                      interval=10)
+        else:
+            epoch_bar(epoch, args.epochs, loss.item(), interval=10)
 
             with open(os.path.join(args.out_dir, args.log), 'a', newline='') as f:
-                csv.writer(f).writerow([epoch, f"{loss:.4f}", f"{val_loss:.4f}", f"{val_oa:.4f}",
-                                        f"{val_miou:.4f}", f"{val_dice:.4f}", f"{val_precision:.4f}", f"{val_recall:.4f}"])
+                csv.writer(f).writerow([epoch, f"{loss:.4f}", f"{val_loss:.4f}",
+                                        f"{val_oa:.4f}", f"{val_miou:.4f}", f"{val_dice:.4f}",
+                                        f"{val_precision:.4f}", f"{val_recall:.4f}",
+                                        f"{val_aa:.4f}", f"{val_kappa:.4f}"])
 
             if val_miou > best_val_miou:
                 best_val_miou = val_miou
@@ -156,19 +203,40 @@ def main():
             data, labels = data.to(DEVICE), labels.to(DEVICE)
             with torch.autocast('cuda', enabled=args.fp16):
                 output = model(data)
-            test_oa, test_miou, test_dice, test_precision, test_recall = compute_metrics(output, labels, test_ds.num_classes)
+            test_oa, test_miou, test_dice, test_precision, test_recall, test_aa, test_kappa = \
+                compute_metrics(output, labels, test_ds.num_classes)
 
-    print(f"\nTest OA:        {test_oa:.4f}")
-    print(f"Test mIoU:      {test_miou:.4f}")
-    print(f"Test Dice:      {test_dice:.4f}")
-    print(f"Test Precision: {test_precision:.4f}")
-    print(f"Test Recall:    {test_recall:.4f}")
+    print_training_done()
+
+    print_results_box({
+        'OA':        test_oa,
+        'mIoU':      test_miou,
+        'Dice':      test_dice,
+        'Precision': test_precision,
+        'Recall':    test_recall,
+        'AA':        test_aa,
+        'kappa':     test_kappa,
+    })
 
     with open(os.path.join(args.out_dir, 'test_results.csv'), 'w', newline='') as f:
-        csv.writer(f).writerow(['best_epoch', 'test_oa', 'test_miou', 'test_dice', 'test_precision', 'test_recall'])
-        csv.writer(f).writerow([best_epoch, f"{test_oa:.4f}", f"{test_miou:.4f}", f"{test_dice:.4f}",
-                                f"{test_precision:.4f}", f"{test_recall:.4f}"])
+        csv.writer(f).writerow(['best_epoch', 'test_oa', 'test_miou', 'test_dice',
+                                 'test_precision', 'test_recall', 'test_aa', 'test_kappa'])
+        csv.writer(f).writerow([best_epoch,
+                                 f"{test_oa:.4f}", f"{test_miou:.4f}", f"{test_dice:.4f}",
+                                 f"{test_precision:.4f}", f"{test_recall:.4f}",
+                                 f"{test_aa:.4f}", f"{test_kappa:.4f}"])
 
-    print(f"\nLogs: {args.log} | Test results: test_results.csv | Best epoch: {best_epoch}")
+    from ghost.utils.display import print_save_and_next, GREEN, BOLD, RESET
+    print(f"  {BOLD}Best epoch:{RESET} {best_epoch}  |  "
+          f"Logs: {args.log}  |  Test results: test_results.csv")
+    print_save_and_next(
+        out_dir     = args.out_dir,
+        save_file   = args.save,
+        data_path   = args.data,
+        gt_path     = args.gt,
+        train_ratio = args.train_ratio,
+        val_ratio   = args.val_ratio,
+    )
+
 if __name__ == '__main__':
     main()
