@@ -106,37 +106,35 @@ def epoch_bar(epoch: int, total: int,
 
     interval: epochs between each locked checkpoint line (default 20)
     """
-    # Position within the current interval (1 → interval)
-    pos_in_interval = (epoch - 1) % interval + 1
-    pct_in_interval = pos_in_interval / interval          # 0.0 → 1.0
-
-    # Overall progress for colour decision
+    # Bar and percentage based on overall progress (0 → 100% across full training)
     overall_pct = epoch / total
-
-    filled = int(BAR_WIDTH * pct_in_interval)
+    filled = int(BAR_WIDTH * overall_pct)
     bar    = "█" * filled + "░" * (BAR_WIDTH - filled)
+    pct    = int(100 * overall_pct)
 
     bar_col = GREEN if overall_pct >= 0.5 else YELLOW
     bar_str = _c(bar, bar_col)
 
     parts = [
         f"{prefix}{BOLD}Epoch {epoch:4d}/{total}{RESET}",
-        f"{bar_str} {_c(f'{pct_in_interval*100:3.0f}%', GRAY)}",
+        f"{bar_str} {_c(f'{pct:3d}%', GRAY)}",
         f"Loss {_c(f'{loss:.4f}', CYAN)}",
     ]
 
     if val_loss is not None:
         parts.append(f"ValLoss {_c(f'{val_loss:.4f}', BLUE)}")
     if oa is not None:
-        col = GREEN if oa >= 0.90 else YELLOW if oa >= 0.75 else RED
+        col = GREEN if oa >= 0.9 else YELLOW if oa >= 0.7 else RED
         parts.append(f"OA {_c(f'{oa:.4f}', col)}")
     if miou is not None:
-        col = GREEN if miou >= 0.65 else YELLOW if miou >= 0.45 else RED
+        col = GREEN if miou >= 0.9 else YELLOW if miou >= 0.7 else RED
         parts.append(f"mIoU {_c(f'{miou:.4f}', col)}")
     if aa is not None:
-        parts.append(f"AA {_c(f'{aa:.4f}', MAGENTA)}")
+        col = GREEN if aa >= 0.9 else YELLOW if aa >= 0.7 else RED
+        parts.append(f"AA {_c(f'{aa:.4f}', col)}")
     if kappa is not None:
-        parts.append(f"κ {_c(f'{kappa:.4f}', GRAY)}")
+        col = GREEN if kappa >= 0.9 else YELLOW if kappa >= 0.7 else RED
+        parts.append(f"κ {_c(f'{kappa:.4f}', col)}")
 
     line = " | ".join(parts)
 
@@ -228,12 +226,25 @@ def print_results_box(metrics: dict, routing: str = None):
     print(f"{BOLD}{GREEN}{'─'*w}{RESET}\n")
 
 
-def print_per_class_iou(class_ious: dict):
+def print_per_class_iou(class_ious: dict, pixel_counts: dict = None):
+    """
+    Print per-class IoU with colour coding.
+    If pixel_counts is provided (dict {class_id: int}), show pixel counts and
+    flag classes with fewer than 20 pixels.
+
+    IoU colour thresholds: green ≥ 0.8, yellow ≥ 0.5, red < 0.5
+    """
     print(f"\n{BOLD}  Per-class IoU:{RESET}")
     for c, iou in class_ious.items():
-        col = GREEN if iou >= 0.70 else YELLOW if iou >= 0.40 else RED
+        col = GREEN if iou >= 0.8 else YELLOW if iou >= 0.5 else RED
         bar = "█" * int(iou * 20)
-        print(f"  Class {c:2d}  {_c(f'{iou:.4f}', col)}  {_c(bar, col)}")
+        if pixel_counts is not None:
+            px      = pixel_counts.get(c, 0)
+            warning = f"  {YELLOW}⚠ few pixels{RESET}" if px < 20 else ""
+            print(f"  Class {c:2d}  {_c(f'{iou:.4f}', col)}  {_c(bar, col):<20s}"
+                  f"  {GRAY}({px:>5d} px){RESET}{warning}")
+        else:
+            print(f"  Class {c:2d}  {_c(f'{iou:.4f}', col)}  {_c(bar, col)}")
     print()
 
 

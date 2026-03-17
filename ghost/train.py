@@ -36,10 +36,11 @@ def main():
 
     # Loss
     parser.add_argument('--loss',        type=str,   default='ce',
-                        choices=['ce', 'squared_ce', 'focal'],
+                        choices=['ce', 'squared_ce', 'focal', 'dice'],
                         help='Loss function (default: ce). '
                              'squared_ce: CE squared, amplifies hard-example penalty. '
-                             'focal: focal loss with --focal_gamma.')
+                             'focal: focal loss with --focal_gamma. '
+                             'dice: combined CrossEntropy + Dice loss.')
     parser.add_argument('--focal_gamma', type=float, default=2.0,
                         help='Focal loss gamma — higher values focus more on hard examples (default: 2.0)')
 

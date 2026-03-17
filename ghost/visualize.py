@@ -199,6 +199,9 @@ def main():
         routing=args.routing
     )
 
+    # Mask background pixels — model was never trained on class 0
+    pred[labels == 0] = 0
+
     # Class names
     class_names = CLASS_NAMES.get(args.dataset, [f'Class {i}' for i in range(num_classes)])
 

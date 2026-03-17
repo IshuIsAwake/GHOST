@@ -7,7 +7,7 @@ import csv
 
 from ghost.datasets.hyperspectral_dataset import HyperspectralDataset
 from ghost.models.spectral_ssm import SpectralSSMEncoder
-from ghost.rssp.rssp_inference import run_inference, compute_rssp_metrics, per_class_iou
+from ghost.rssp.rssp_inference import run_inference, compute_rssp_metrics
 from ghost.utils.display import print_results_box, print_per_class_iou
 
 def main():
@@ -95,7 +95,7 @@ def main():
         eval_labels = np.zeros_like(labels_np)
         eval_labels[test_mask > 0] = labels_np[test_mask > 0]
 
-        oa, miou, dice, precision, recall, aa, kappa = compute_rssp_metrics(
+        oa, miou, dice, precision, recall, aa, kappa, per_class_ious = compute_rssp_metrics(
             final_pred, eval_labels, num_classes
         )
 
@@ -109,8 +109,9 @@ def main():
             'kappa':     kappa,
         }, routing=current_routing)
 
-        class_ious = per_class_iou(final_pred, eval_labels, num_classes)
-        print_per_class_iou(class_ious)
+        # Per-class pixel counts from the test split
+        pixel_counts = {c: int((eval_labels == c).sum()) for c in per_class_ious}
+        print_per_class_iou(per_class_ious, pixel_counts=pixel_counts)
 
         out_csv = os.path.join(args.out_dir, f'test_results_{current_routing}.csv')
         with open(out_csv, 'w', newline='') as f:

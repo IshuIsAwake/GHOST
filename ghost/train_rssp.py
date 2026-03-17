@@ -34,17 +34,32 @@ def main():
     parser.add_argument('--base_filters', type=int,   default=32)
     parser.add_argument('--num_filters',  type=int,   default=8)
     parser.add_argument('--num_blocks',   type=int,   default=3)
-    parser.add_argument('--epochs',       type=int,   default=300)
+    parser.add_argument('--epochs',       type=int,   default=400)
     parser.add_argument('--lr',           type=float, default=1e-4)
 
     # Loss
     parser.add_argument('--loss',         type=str,   default='ce',
-                        choices=['ce', 'squared_ce', 'focal'],
+                        choices=['ce', 'squared_ce', 'focal', 'dice'],
                         help='Loss function (default: ce). '
                              'squared_ce: CE squared, amplifies hard-example penalty. '
-                             'focal: focal loss with --focal_gamma.')
+                             'focal: focal loss with --focal_gamma. '
+                             'dice: combined CrossEntropy + Dice loss.')
     parser.add_argument('--focal_gamma',  type=float, default=2.0,
                         help='Focal loss gamma (default: 2.0)')
+
+    # Early stopping
+    parser.add_argument('--patience',     type=int,   default=50,
+                        help='Stop if val mIoU has not improved for this many epochs (default: 50)')
+    parser.add_argument('--min_epochs',   type=int,   default=40,
+                        help='Never early-stop before this epoch (default: 40)')
+
+    # Forest count
+    parser.add_argument('--leaf_forests', type=int,   default=3,
+                        help='Number of forests for leaf nodes with ≤ 2 classes (default: 3)')
+
+    # LR warmup
+    parser.add_argument('--warmup_epochs', type=int,  default=0,
+                        help='Linear LR warmup epochs from lr/10 → lr (default: 0 = disabled)')
 
     # SSM / SSSR
     parser.add_argument('--d_model',      type=int,   default=64)
@@ -62,6 +77,11 @@ def main():
     parser.add_argument('--out-dir',      type=str,   default='.')
 
     args = parser.parse_args()
+
+    # Skip expensive SSM pretraining when using forest-only routing
+    if args.routing == 'forest' and args.ssm_epochs > 1:
+        print("Forest-only routing selected — skipping SSM pretraining (set --ssm_epochs manually to override)")
+        args.ssm_epochs = 1
 
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -155,20 +175,24 @@ def main():
     print(f"\n=== Training RSSP Forest + SSSR Routers (loss={args.loss}) ===")
     trained_models = train_tree(
         tree, data, labels,
-        total_classes = num_classes - 1,
-        train_coords  = train_ds.train_coords,
-        val_coords    = val_ds.val_coords,
-        fp_map        = fp_map,
-        ssm_d_model   = args.d_model,
-        base_epochs   = args.epochs,
-        num_forests   = args.forests,
-        base_filters  = args.base_filters,
-        num_filters   = args.num_filters,
-        num_blocks    = args.num_blocks,
-        lr            = args.lr,
-        device        = str(DEVICE),
-        loss_type     = args.loss,
-        focal_gamma   = args.focal_gamma
+        total_classes  = num_classes - 1,
+        train_coords   = train_ds.train_coords,
+        val_coords     = val_ds.val_coords,
+        fp_map         = fp_map,
+        ssm_d_model    = args.d_model,
+        base_epochs    = args.epochs,
+        num_forests    = args.forests,
+        base_filters   = args.base_filters,
+        num_filters    = args.num_filters,
+        num_blocks     = args.num_blocks,
+        lr             = args.lr,
+        device         = str(DEVICE),
+        loss_type      = args.loss,
+        focal_gamma    = args.focal_gamma,
+        patience       = args.patience,
+        min_epochs     = args.min_epochs,
+        leaf_forests   = args.leaf_forests,
+        warmup_epochs  = args.warmup_epochs,
     )
 
     with open(os.path.join(args.out_dir, args.save), 'wb') as f:
@@ -198,7 +222,7 @@ def main():
     eval_labels = np.zeros_like(labels_np)
     eval_labels[test_mask > 0] = labels_np[test_mask > 0]
 
-    oa, miou, dice, precision, recall, aa, kappa = compute_rssp_metrics(
+    oa, miou, dice, precision, recall, aa, kappa, _ = compute_rssp_metrics(
         final_pred, eval_labels, num_classes)
 
     print_results_box({

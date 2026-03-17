@@ -63,8 +63,9 @@ def build_criterion(loss_type: str,
         'squared_ce' — CE squared; amplifies hard-example penalty without
                        explicit class weighting
         'focal'      — focal loss with tunable gamma
+        'dice'       — combined CrossEntropy + Dice loss (CE weight=0.5, Dice weight=0.5)
     """
-    valid = {'ce', 'squared_ce', 'focal'}
+    valid = {'ce', 'squared_ce', 'focal', 'dice'}
     if loss_type not in valid:
         raise ValueError(
             f"Unknown loss type: '{loss_type}'. Choose from: {sorted(valid)}"
@@ -78,3 +79,7 @@ def build_criterion(loss_type: str,
 
     elif loss_type == 'focal':
         return FocalLoss(gamma=focal_gamma, ignore_index=ignore_index)
+
+    elif loss_type == 'dice':
+        from ghost.losses import CEDiceLoss
+        return CEDiceLoss(ignore_index=ignore_index)
