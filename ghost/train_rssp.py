@@ -1,5 +1,6 @@
 import argparse
 import os
+import csv
 import torch
 import numpy as np
 import pickle
@@ -12,7 +13,9 @@ from ghost.rssp.ssm_pretrain import pretrain_ssm
 from ghost.models.spectral_ssm import SpectralSSMEncoder
 from ghost.utils.display import (
     print_training_start, print_training_done,
-    print_results_box, print_per_class_iou, print_save_and_next
+    print_results_box, print_per_class_iou, print_save_and_next,
+    print_config_box,
+    GREEN, YELLOW, RESET
 )
 
 # ── Args ──────────────────────────────────────────────────────────────────────
@@ -61,6 +64,10 @@ def main():
     parser.add_argument('--warmup_epochs', type=int,  default=0,
                         help='Linear LR warmup epochs from lr/10 → lr (default: 0 = disabled)')
 
+    # Validation interval
+    parser.add_argument('--val_interval',  type=int,  default=20,
+                        help='Validate every N epochs (default: 20). Lower = finer checkpointing but slower.')
+
     # SSM / SSSR
     parser.add_argument('--d_model',      type=int,   default=64)
     parser.add_argument('--d_state',      type=int,   default=16)
@@ -90,8 +97,6 @@ def main():
     np.random.seed(args.seed)
 
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {DEVICE}")
-    print(f"Loss:   {args.loss}" + (f" (gamma={args.focal_gamma})" if 'focal' in args.loss else ""))
 
     # ── Load datasets ─────────────────────────────────────────────────────────────
     train_ds = HyperspectralDataset(args.data, args.gt, split='train',
@@ -108,6 +113,24 @@ def main():
     labels      = train_ds.labels
     num_classes = train_ds.num_classes
 
+    # ── Config box ─────────────────────────────────────────────────────────────────
+    device_str = str(DEVICE)
+    if torch.cuda.is_available() and DEVICE.type == 'cuda':
+        gpu_name = torch.cuda.get_device_name(0)
+        total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        device_str = f"cuda ({gpu_name}, {total_mem:.0f} GB)"
+
+    loss_str = args.loss + (f" (gamma={args.focal_gamma})" if 'focal' in args.loss else "")
+    print_config_box("GHOST RSSP Training", [
+        ("Device",       device_str),
+        ("Loss",         loss_str),
+        ("Routing",      args.routing),
+        ("Train pixels", f"{len(train_ds.coords):,} ({num_classes - 1} classes)"),
+        ("Val pixels",   f"{len(val_ds.coords):,}"),
+        ("Test pixels",  f"{len(test_ds.coords):,}"),
+        ("Output",       args.out_dir),
+    ])
+
     # ── SSM pre-training (or load) ────────────────────────────────────────────────
     print("\n=== SSM Encoder ===")
 
@@ -115,6 +138,8 @@ def main():
         d_model=args.d_model,
         d_state=args.d_state
     ).to(DEVICE)
+
+    print(f"  {YELLOW}⚠ SSM Encoder is experimental — results may vary{RESET}")
 
     if args.ssm_load is not None:
         print(f"Loading SSM weights from {args.ssm_load}")
@@ -193,6 +218,8 @@ def main():
         min_epochs     = args.min_epochs,
         leaf_forests   = args.leaf_forests,
         warmup_epochs  = args.warmup_epochs,
+        val_interval   = args.val_interval,
+        out_dir        = args.out_dir,
     )
 
     with open(os.path.join(args.out_dir, args.save), 'wb') as f:
@@ -237,6 +264,27 @@ def main():
 
     class_ious = per_class_iou(final_pred, eval_labels, num_classes)
     print_per_class_iou(class_ious)
+
+    # ── Class report CSV ─────────────────────────────────────────────────────
+    report_csv = os.path.join(args.out_dir, f'class_report_{args.routing}.csv')
+    with open(report_csv, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['class_id', 'total_test_pixels', 'correct_pixels',
+                         'IoU', 'Precision', 'Recall'])
+        for c in sorted(class_ious.keys()):
+            total_px   = int((eval_labels == c).sum())
+            correct_px = int(((final_pred == c) & (eval_labels == c)).sum())
+            pred_c     = (final_pred[eval_labels > 0] == c)
+            target_c   = (eval_labels[eval_labels > 0] == c)
+            tp = int((pred_c & target_c).sum())
+            fp = int((pred_c & ~target_c).sum())
+            fn = int((~pred_c & target_c).sum())
+            c_prec = tp / (tp + fp + 1e-8)
+            c_rec  = tp / (tp + fn + 1e-8)
+            writer.writerow([c, total_px, correct_px,
+                             f"{class_ious[c]:.6f}",
+                             f"{c_prec:.6f}", f"{c_rec:.6f}"])
+    print(f"  {GREEN}Saved →{RESET} {report_csv}")
 
     print_save_and_next(
         out_dir     = args.out_dir,

@@ -1,0 +1,7 @@
+include LICENSE
+include requirements.txt
+recursive-include ghost/configs *.yaml
+# Exclude all .py source files from sdist — we only ship compiled wheels
+recursive-exclude ghost *.py
+# But keep __init__.py files (needed for package imports)
+recursive-include ghost __init__.py

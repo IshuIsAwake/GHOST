@@ -1,4 +1,6 @@
 import time
+import csv
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,17 +10,9 @@ from ghost.models.hyperspectral_net import HyperspectralNet
 from ghost.models.losses import build_criterion
 from ghost.rssp.sssr_router import SSSRRouter, train_router
 from ghost.utils.display import (
-    epoch_bar, forest_banner, node_banner, forest_done_line,
+    _c, epoch_bar, forest_banner, node_banner, forest_done_line,
     BOLD, RESET, CYAN, GRAY, GREEN, YELLOW, RED, MAGENTA
 )
-
-
-def _vram_str(device: str) -> str:
-    """Return peak VRAM usage since last reset. Meaningful even after model deletion."""
-    if torch.cuda.is_available() and device != 'cpu':
-        peak = torch.cuda.max_memory_allocated() / 1024 ** 3
-        return f"{peak:.2f} GB peak"
-    return "N/A (CPU)"
 
 
 def _elapsed_str(start: float) -> str:
@@ -137,6 +131,8 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
                patience: int = 50, min_epochs: int = 40,
                leaf_forests: int = 3,
                warmup_epochs: int = 0,
+               val_interval: int = 20,
+               out_dir: str = None,
                global_start: float = None):
     """
     Train forest ensemble + SSSR routing head for one RSSP node.
@@ -147,6 +143,8 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
     min_epochs:     never early-stop before this epoch
     leaf_forests:   number of forests for leaf nodes (≤ 2 classes)
     warmup_epochs:  linear LR warmup from lr/10 → lr over this many epochs
+    val_interval:   validate every N epochs (default 20)
+    out_dir:        output directory for CSVs (None = no CSV)
     global_start:   time.time() from the very start of train_tree
     """
     node_classes  = node['classes']
@@ -159,9 +157,6 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
 
     # Leaf nodes use fewer forests (they converge to identical answers)
     actual_forests = num_forests if len(node_classes) > 2 else min(num_forests, leaf_forests)
-
-    if torch.cuda.is_available() and device != 'cpu':
-        torch.cuda.reset_peak_memory_stats()  # fresh peak counter per node
 
     train_ds = NodeDataset(data, labels, node_classes, train_coords)
     val_ds   = NodeDataset(data, labels, node_classes, val_coords)
@@ -179,6 +174,12 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
         focal_gamma = focal_gamma,
         ignore_index= 0
     )
+
+    # ── CSV epoch history ────────────────────────────────────────────────────
+    csv_path = None
+    csv_header_written = False
+    if out_dir is not None:
+        csv_path = os.path.join(out_dir, 'training_history.csv')
 
     forest_models  = []
     forest_mious   = []   # for node summary
@@ -206,6 +207,8 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
 
         best_val_miou = 0.0
         best_state    = None
+        best_epoch    = 0
+        best_oa = best_aa = best_kappa = 0.0
         # Initialise val metrics so they're always bound even before first checkpoint
         v_loss = float('inf')
         val_oa = val_miou = val_dice = val_prec = val_rec = val_aa = val_kappa = 0.0
@@ -232,7 +235,7 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
             if epoch > warmup_epochs:
                 scheduler.step(loss)
 
-            if epoch % 20 == 0 or epoch == epochs:
+            if epoch % val_interval == 0 or epoch == epochs:
                 model.eval()
                 with torch.no_grad():
                     for d, l in val_loader:
@@ -245,17 +248,43 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
                 # Update best checkpoint
                 if val_miou > best_val_miou:
                     best_val_miou = val_miou
+                    best_epoch    = epoch
+                    best_oa       = val_oa
+                    best_aa       = val_aa
+                    best_kappa    = val_kappa
                     best_state    = {k: v.cpu().clone()
                                      for k, v in model.state_dict().items()}
                     epochs_without_improvement = 0
                 else:
-                    epochs_without_improvement += 20  # validation runs every 20 epochs
+                    epochs_without_improvement += val_interval
 
                 epoch_bar(epoch, epochs, loss.item(),
                           val_loss=v_loss,
                           oa=val_oa, miou=val_miou,
                           aa=val_aa, kappa=val_kappa,
-                          interval=20)
+                          interval=val_interval)
+
+                # Write CSV row
+                if csv_path is not None:
+                    file_exists = os.path.exists(csv_path)
+                    with open(csv_path, 'a', newline='') as cf:
+                        writer = csv.writer(cf)
+                        if not file_exists and not csv_header_written:
+                            writer.writerow([
+                                'node_id', 'forest_idx', 'epoch',
+                                'loss', 'val_loss',
+                                'OA', 'mIoU', 'Dice', 'Precision', 'Recall',
+                                'AA', 'kappa'
+                            ])
+                            csv_header_written = True
+                        writer.writerow([
+                            node_id, forest_idx + 1, epoch,
+                            f'{loss.item():.6f}', f'{v_loss:.6f}',
+                            f'{val_oa:.6f}', f'{val_miou:.6f}',
+                            f'{val_dice:.6f}', f'{val_prec:.6f}',
+                            f'{val_rec:.6f}', f'{val_aa:.6f}',
+                            f'{val_kappa:.6f}'
+                        ])
 
                 # Early stopping: perfect score
                 if val_miou >= 0.99 and epoch >= min_epochs:
@@ -270,7 +299,7 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
                     break
 
             else:
-                epoch_bar(epoch, epochs, loss.item(), interval=20)
+                epoch_bar(epoch, epochs, loss.item(), interval=val_interval)
 
         if stopped_early:
             early_stop_count += 1
@@ -280,9 +309,8 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
                           for k, v in model.state_dict().items()}
 
         print(forest_done_line(forest_idx, actual_forests, best_val_miou,
-                               _elapsed_str(node_start),
-                               _elapsed_str(global_start),
-                               _vram_str(device)))
+                               best_epoch, best_oa, best_aa, best_kappa,
+                               _elapsed_str(global_start)))
 
         forest_models.append({
             'state_dict':      best_state,
@@ -304,18 +332,13 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
         worst_idx = int(np.argmin(forest_mious))
         total_time = _elapsed_str(node_start)
 
-        w = 52
-        print(f"\n  {'─'*w}")
-        print(f"  │ Node '{node_id}' Summary{' '*(w - len(node_id) - 18)}│")
-        mious_str = ", ".join(f"{v:.4f}" for v in forest_mious)
-        print(f"  │ Forest mIoU : {mious_str[:w-17]}{' '*(max(0, w-17-len(mious_str[:w-17])))}│")
-        print(f"  │ Mean: {mean_miou:.4f}  Std: {std_miou:.4f}{' '*(w-30)}│")
-        print(f"  │ Best: Forest {best_idx+1} ({forest_mious[best_idx]:.4f})"
-              f"  Worst: Forest {worst_idx+1} ({forest_mious[worst_idx]:.4f})"
-              f"{' '*(max(0, w - 46))}│")
-        print(f"  │ Early stops: {early_stop_count}/{actual_forests}"
-              f"  Total time: {total_time}{' '*(max(0, w - 27 - len(total_time)))}│")
-        print(f"  {'─'*w}\n")
+        mious_str = "  ".join(f"{_c(f'{v:.4f}', GREEN if v >= 0.65 else YELLOW if v >= 0.45 else RED)}"
+                              for v in forest_mious)
+        print(f"\n  {BOLD}Node '{node_id}'{RESET} — {actual_forests} forests trained in {total_time}")
+        print(f"  mIoU  {mious_str}   {GRAY}mean {mean_miou:.4f} ± {std_miou:.4f}{RESET}")
+        print(f"  {GREEN}Best{RESET}: Forest {best_idx+1} ({forest_mious[best_idx]:.4f})"
+              f"  {RED}Worst{RESET}: Forest {worst_idx+1} ({forest_mious[worst_idx]:.4f})"
+              f"  {GRAY}Early stops: {early_stop_count}/{actual_forests}{RESET}\n")
 
     # ── Train SSSR routing head (internal nodes only) ─────────────────────────
     router_state = None
@@ -363,6 +386,8 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
                patience: int = 50, min_epochs: int = 40,
                leaf_forests: int = 3,
                warmup_epochs: int = 0,
+               val_interval: int = 20,
+               out_dir: str = None,
                global_start: float = None):
     """
     Recursively train all RSSP tree nodes.
@@ -383,6 +408,8 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
         patience=patience, min_epochs=min_epochs,
         leaf_forests=leaf_forests,
         warmup_epochs=warmup_epochs,
+        val_interval=val_interval,
+        out_dir=out_dir,
         global_start=global_start
     )
 
@@ -398,6 +425,8 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
             patience=patience, min_epochs=min_epochs,
             leaf_forests=leaf_forests,
             warmup_epochs=warmup_epochs,
+            val_interval=val_interval,
+            out_dir=out_dir,
             global_start=global_start
         ))
 
@@ -413,6 +442,8 @@ def train_tree(tree, data, labels, total_classes, train_coords, val_coords,
             patience=patience, min_epochs=min_epochs,
             leaf_forests=leaf_forests,
             warmup_epochs=warmup_epochs,
+            val_interval=val_interval,
+            out_dir=out_dir,
             global_start=global_start
         ))
 

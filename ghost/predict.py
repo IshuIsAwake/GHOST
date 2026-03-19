@@ -1,4 +1,5 @@
 import argparse
+import time
 import torch
 import numpy as np
 import pickle
@@ -8,7 +9,11 @@ import csv
 from ghost.datasets.hyperspectral_dataset import HyperspectralDataset
 from ghost.models.spectral_ssm import SpectralSSMEncoder
 from ghost.rssp.rssp_inference import run_inference, compute_rssp_metrics
-from ghost.utils.display import print_results_box, print_per_class_iou
+from ghost.utils.display import (
+    print_predict_start, print_results_box, print_per_class_iou, print_training_done,
+    print_config_box,
+    BOLD, RESET, CYAN, GRAY, GREEN
+)
 
 def main():
     parser = argparse.ArgumentParser(description='GHOST — Standalone Inference')
@@ -26,10 +31,24 @@ def main():
 
     args = parser.parse_args()
 
+    print_predict_start()
+
     os.makedirs(args.out_dir, exist_ok=True)
 
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {DEVICE}")
+
+    device_str = str(DEVICE)
+    if torch.cuda.is_available() and DEVICE.type == 'cuda':
+        gpu_name = torch.cuda.get_device_name(0)
+        total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        device_str = f"cuda ({gpu_name}, {total_mem:.0f} GB)"
+
+    print_config_box("GHOST Predict", [
+        ("Device",  device_str),
+        ("Model",   args.model),
+        ("Data",    args.data),
+        ("Routing", args.routing),
+    ])
 
     test_ds = HyperspectralDataset(
         args.data, args.gt, split='test',
@@ -53,6 +72,8 @@ def main():
     print("Models loaded.")
 
     routings = ['forest', 'hybrid', 'soft'] if args.routing == 'all' else [args.routing]
+
+    overall_start = time.time()
 
     for current_routing in routings:
         print(f"\n=== Running Cascade Inference (routing={current_routing}) ===")
@@ -82,12 +103,17 @@ def main():
         else:
             print("Forest-only routing — SSM encoder not needed.")
 
+        t0 = time.time()
+
         final_pred = run_inference(
             tree, trained_models,
             data,
             ssm_encoder, DEVICE, num_classes,
             routing=current_routing
         )
+
+        infer_secs = time.time() - t0
+        print(f"  Inference complete in {infer_secs:.1f}s")
 
         test_mask   = test_ds.split_mask.numpy()
         labels_np   = labels.numpy()
@@ -113,6 +139,7 @@ def main():
         pixel_counts = {c: int((eval_labels == c).sum()) for c in per_class_ious}
         print_per_class_iou(per_class_ious, pixel_counts=pixel_counts)
 
+        # ── Summary CSV (aggregate metrics) ─────────────────────────────────
         out_csv = os.path.join(args.out_dir, f'test_results_{current_routing}.csv')
         with open(out_csv, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -122,6 +149,33 @@ def main():
                              f"{oa:.4f}", f"{miou:.4f}", f"{dice:.4f}",
                              f"{precision:.4f}", f"{recall:.4f}",
                              f"{aa:.4f}", f"{kappa:.4f}"])
+
+        # ── Class report CSV (per-class details) ────────────────────────────
+        report_csv = os.path.join(args.out_dir, f'class_report_{current_routing}.csv')
+        with open(report_csv, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['class_id', 'total_test_pixels', 'correct_pixels',
+                             'IoU', 'Precision', 'Recall'])
+            for c in sorted(per_class_ious.keys()):
+                total_px   = int((eval_labels == c).sum())
+                correct_px = int(((final_pred == c) & (eval_labels == c)).sum())
+                pred_c     = (final_pred[eval_labels > 0] == c)
+                target_c   = (eval_labels[eval_labels > 0] == c)
+                tp = int((pred_c & target_c).sum())
+                fp = int((pred_c & ~target_c).sum())
+                fn = int((~pred_c & target_c).sum())
+                c_prec = tp / (tp + fp + 1e-8)
+                c_rec  = tp / (tp + fn + 1e-8)
+                writer.writerow([c, total_px, correct_px,
+                                 f"{per_class_ious[c]:.6f}",
+                                 f"{c_prec:.6f}", f"{c_rec:.6f}"])
+
+        print(f"  {GREEN}Saved →{RESET} {out_csv}")
+        print(f"  {GREEN}Saved →{RESET} {report_csv}")
+
+    total_secs = time.time() - overall_start
+    print(f"\n  {GRAY}Total predict time: {total_secs:.1f}s{RESET}")
+    print_training_done()
 
 if __name__ == '__main__':
     main()

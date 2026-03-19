@@ -1,92 +1,168 @@
 # GHOST Architecture
 
-A technical overview of the pipeline components. This is not exhaustive — the code is the authoritative reference.
-
 ---
 
-## Pipeline
+## Pipeline Overview
 
 ```
-RAW .mat FILE  (H, W, C)
-      │
-      ▼
-Continuum Removal       strips brightness, isolates absorption shape
-      │
-      ▼
-Spectral 3D Conv Stack  local spectral + spatial features, kernel (7,3,3)
-      │
-      ▼
-SE Block                learned per-channel attention weights
-      │
-      ▼
-2D U-Net                multi-scale spatial context, skip connections
-      │
-      ▼
-RSSP Tree               per-node specialist ensembles (see below)
+                         Input: .mat file (H, W, Bands)
+                                    |
+                    ┌───────────────┴───────────────┐
+                    |                               |
+             Continuum Removal              Raw spectra saved
+             (physics-based norm)           for RSSP tree building
+                    |                               |
+                    v                               v
+            Spectral 3D Conv Stack          SAM distance matrix
+            kernel (7, 3, 3)                between class means
+            num_blocks layers                       |
+                    |                               v
+                    v                        RSSP Binary Tree
+              SE Attention                  (recursive spectral
+              (channel weighting)            class splitting)
+                    |                               |
+                    v                               |
+              2D U-Net Encoder/Decoder              |
+              (4-level, skip connections)            |
+                    |                               |
+                    └───────────┬───────────────────┘
+                                |
+                    Per-node forest ensemble
+                    (each tree node trains N independent models)
+                                |
+                                v
+                    Soft cascade inference
+                    (probabilities averaged across forests,
+                     propagated down tree branches)
+                                |
+                                v
+                     Prediction Map (H, W)
 ```
-
-All dimensions — band count, class count, spatial size — are read from the file at runtime. Nothing is hardcoded.
 
 ---
 
 ## Components
 
-### Continuum Removal
+### 1. Continuum Removal
 
-Divides each pixel's spectrum by its convex hull envelope:
+Replaces PCA as the dimensionality-agnostic preprocessing step.
 
 ```
-CR(λ) = spectrum(λ) / continuum(λ)
+CR(lambda) = spectrum(lambda) / continuum(lambda)
 ```
 
-This normalises brightness variation across sensors and illumination conditions, leaving only absorption feature shape. It replaces PCA as the dimensionality-agnostic preprocessing step. No components to choose, no information discarded.
+The continuum is the convex hull envelope of the reflectance spectrum. Dividing by it removes brightness variation across sensors and illumination conditions, leaving only **absorption feature shape**.
 
-### Spectral 3D Convolution Stack
+- No components to choose
+- No information discarded
+- Works on any band count without configuration
 
-3D convolutions with kernel `(7, 3, 3)` — 7 bands deep, 3×3 spatially. Models spectral band adjacency explicitly rather than treating every band as independent. Runs `num_blocks` sequential layers; output is `num_filters × C` channels.
+**Source:** `ghost/preprocessing/continuum_removal.py`
 
-### Squeeze-and-Excitation Block
+### 2. Spectral 3D Convolution Stack
 
-Global average pools each channel to a scalar, passes through a small MLP, and multiplies each channel by its learned weight. Selects which spectral features are relevant, suppresses the rest.
+3D convolutions with kernel `(7, 3, 3)` — 7 bands spectral depth, 3x3 spatial.
 
-### 2D U-Net
+- Models spectral band adjacency explicitly (nearby bands are correlated)
+- `num_blocks` sequential layers (default: 3)
+- Output channels: `num_filters x C`
+- Handles arbitrary band counts at runtime
 
-Four downsampling stages via MaxPool2d, symmetric decoder with ConvTranspose2d. Skip connections wire encoder feature maps directly to corresponding decoder levels, preserving spatial detail that cannot survive the bottleneck. Handles non-power-of-two dimensions via bilinear interpolation before skip concatenation.
+**Source:** `ghost/models/spectral_3d_block.py`
 
-Each ConvBlock:
-```
-Conv2d(3×3) → BN → ReLU → Dropout2d(0.3) → Conv2d(3×3) → BN → ReLU
-```
+### 3. Squeeze-and-Excitation (SE) Block
 
-### RSSP — Recursive Spectral Splitting with Parallel Forests
+Channel attention mechanism:
 
-Builds a binary class hierarchy from the dataset's own spectral statistics. At each node, the two most spectrally distant classes (by SAM distance on continuum-removed mean spectra) become split seeds. Remaining classes are assigned to whichever seed they're closer to. A pixel balance correction prevents one branch from dominating.
+1. Global average pool each channel to a scalar
+2. Pass through a 2-layer MLP (reduce → expand)
+3. Sigmoid activation → per-channel weight
+4. Multiply each channel by its learned weight
 
-Each node trains an independent ensemble of `num_forests` HyperspectralNet models. Global class IDs are remapped to local IDs per node. Epoch budget scales with node complexity.
+Selects which spectral features matter, suppresses noise channels.
 
-Tree construction stops when: fewer than 3 classes remain, any class has fewer than 10 pixels, depth ≥ 3, or mean intra-node SAM < 0.05.
+**Source:** `ghost/models/se_block.py`
 
-At inference, softmax probabilities are averaged across forest members and propagated down the tree with soft routing weights.
+### 4. 2D U-Net
 
-### SSSR — Selective Spectral State Routing *(experimental)*
+Standard encoder-decoder with skip connections:
 
-Replaces hard argmax routing at each tree node with probabilistic soft routing. A frozen spectral encoder produces per-pixel fingerprints; a lightweight routing head at each node outputs `p_left ∈ (0,1)`. Pixels flow down both branches weighted by confidence. In hybrid mode, forest routing is the base and SSSR corrects proportionally to its own confidence. Inactive by default.
+- **Encoder:** 4 downsampling stages via MaxPool2d
+- **Decoder:** symmetric upsampling via ConvTranspose2d
+- **Skip connections:** encoder features concatenated to decoder at each level
+- **ConvBlock:** `Conv2d(3x3) -> BN -> ReLU -> Dropout(0.3) -> Conv2d(3x3) -> BN -> ReLU`
+- Channel progression: `f -> 2f -> 4f -> 8f -> 16f` (where `f = base_filters`)
+
+Handles non-power-of-two spatial dimensions via bilinear interpolation before skip concatenation.
+
+**Source:** `ghost/models/encoder_2d.py`, `ghost/models/decoder_2d.py`
+
+### 5. RSSP — Recursive Spectral Splitting with Parallel Forests
+
+The core of GHOST's approach to multi-class segmentation.
+
+**Tree Construction:**
+
+1. Compute mean spectrum per class (after continuum removal)
+2. Build pairwise SAM (Spectral Angle Mapper) distance matrix
+3. Find the two most spectrally distant classes → split seeds
+4. Assign remaining classes to whichever seed they're closer to
+5. Apply pixel balance correction (prevents one branch from dominating)
+6. Recurse on each branch
+
+**Stopping conditions:**
+- Fewer than 3 classes in a node
+- Any class has fewer than 10 pixels
+- Depth >= 3
+- Mean intra-node SAM < 0.05 (classes too similar to split further)
+
+**Training:**
+
+Each tree node trains an independent ensemble of `num_forests` HyperspectralNet models:
+- Global class IDs are remapped to local IDs per node
+- Epoch budget scales with node complexity: `max(epochs//2, epochs x node_classes/total_classes)`
+- Each forest member uses a different random seed
+- Best model (by validation mIoU) is checkpointed per forest member
+
+**Inference:**
+
+Soft cascade — softmax probabilities are averaged across forest members, then propagated down the tree with routing weights. Final prediction is argmax of accumulated global-class probabilities.
+
+**Source:** `ghost/rssp/sam_clustering.py`, `ghost/rssp/rssp_trainer.py`, `ghost/rssp/rssp_inference.py`
+
+### 6. SSSR Router (Experimental)
+
+Selective Spectral State Routing. Replaces hard argmax at each tree node with probabilistic soft routing.
+
+- A frozen spectral encoder produces per-pixel fingerprints
+- A lightweight routing head at each node outputs `p_left in (0, 1)`
+- In hybrid mode: forest routing is base, SSSR corrects proportionally to confidence
+
+**Status:** Experimental. Forest routing outperforms hybrid/soft in all tested configurations. The SSM encoder will be reworked in a future version.
+
+**Source:** `ghost/rssp/sssr_router.py`, `ghost/models/spectral_ssm.py`
 
 ---
 
-## Training
+## Training Configuration
 
-- **Loss:** CrossEntropyLoss with `ignore_index=0` (background masked)
-- **Optimiser:** AdamW, `weight_decay=1e-4`
-- **Scheduler:** ReduceLROnPlateau, `patience=10, factor=0.5`
-- **Checkpoint:** best validation mIoU per node
-- **Splits:** stratified per class — every class appears in every split
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Loss | CrossEntropy | Options: `ce`, `dice`, `focal`, `squared_ce` |
+| Optimiser | AdamW | `weight_decay=1e-4` |
+| Scheduler | ReduceLROnPlateau | `patience=10, factor=0.5` |
+| Early stopping | patience=50 | No improvement for N epochs → stop |
+| Checkpoint | best val mIoU | Per node, per forest member |
+| Splits | stratified | Every class appears in every split |
 
 ---
 
 ## Known Limitations
 
-- Local spectral context only (7-band kernel). Long-range spectral dependencies are not modelled.
-- No spatial regularisation — predictions are per-pixel; homogeneous regions can show speckle noise.
-- Class imbalance is handled structurally by RSSP but not at the loss level. On imbalanced datasets, dominant classes can suppress minority predictions.
-- Full-image training paradigm is data-efficient but incompatible with transformer/Mamba components that require patch-based sample diversity to train effectively.
+- Local spectral context only (7-band kernel) — long-range spectral dependencies not modelled
+- No spatial regularisation — per-pixel predictions, no CRF post-processing
+- Class imbalance handled structurally by RSSP but not at the sampling level
+- Full-image training — incompatible with patch-based methods that need sample diversity
+- Single image per training run — no multi-scene training
+
+See [TODO.md](TODO.md) for the full list.

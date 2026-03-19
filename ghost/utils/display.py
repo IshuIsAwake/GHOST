@@ -2,6 +2,7 @@
 ghost/utils/display.py
 All CLI visual candy: ASCII art, progress bars, styled prints.
 """
+import subprocess
 
 # ── ANSI colour helpers ───────────────────────────────────────────────────────
 RESET  = "\033[0m"
@@ -22,13 +23,33 @@ def _c(text, *codes):
 
 # ── ASCII art ─────────────────────────────────────────────────────────────────
 
-# Small ghost shown on every ghost command invocation
+# Small ghost (legacy, unused)
 GHOST_LOGO = f"""{CYAN}{BOLD}
   .--.
  (o  o)  G H O S T
  | O  |  Generalizable Hyperspectral
   \\--/   Observation & Segmentation Toolkit
   ~~~~
+{RESET}"""
+
+# Blushing ghost — used by predict.py
+GHOST_PREDICT = f"""{CYAN}{BOLD}
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠟⠋⠙⠛⠉⠙⠻⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⣤⡤⢄⣀⣠⡏⠁⠀⠀⠀⠀⠀⠀⠀⠀⢳⣀⣠⣤⣤⣄⠀⠀⠀
+⠀⠀⠀⣸⣿⣦⡀⠀⠉⠙⠲⠤⠤⠤⠤⠤⠤⠴⠚⠉⠁⠀⣠⣾⣿⡀⠀⠀
+⠀⣀⣀⣿⣿⣿⣿⡶⢤⣀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⠴⣾⣿⣿⣿⣇⣀⠀
+⣾⠋⠙⣻⣿⣿⡟⠀⠀⠈⣭⣟⠒⠒⠒⠒⢲⣯⡉⠀⠀⠈⢿⣿⡟⠁⠙⣧
+⣿⠀⠀⠘⢿⡟⠀⠀⠀⠸⣿⣿⠀⠀⠀⠀⣿⣿⡇⠀⠀⠀⠘⡿⠃⠀⠀⢻
+⢻⣆⠀⠀⠀⠀⠀⠀⠀⡀⠉⠁⠀⠀⠀⠀⠈⠉⠀⠀⠀⠀⠀⠀⠀⠀⢠⡾
+⠀⠹⣤⡀⠀⠀⠀⠀⠀⢿⣶⣤⣤⣤⣤⣤⣤⣶⡾⠀⠀⠀⠀⠀⢀⣠⠞⠀
+⠀⠀⠈⠛⣶⠀⠀⠀⠀⠀⠙⠿⢟⣉⣉⣻⠿⠋⠀⠀⠀⠀⢠⣶⠟⠁⠀⠀
+⠀⠀⠀⠀⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⡏⠀⠀⠀⠀
+⠀⠀⠀⠀⠸⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡿⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢻⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢾⠇⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠻⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠷⢦⣄⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠈⢳⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢶⣠⣤⣤⣤⣤⣤⣤⣤⣤⣴⠾⠛⠁⠀⠀⠀
+⠀  Predicting...
 {RESET}"""
 
 # Three-ghost boo screen
@@ -56,6 +77,7 @@ GHOST_FLOWER = f"""{CYAN}
 ⠙⠶⠦⠤⠶⠖⠒⢤⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡴⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠈⣷⠀⠀⠀⠀⢀⣤⠴⠶⣤⣀⠀⠀⣠⠞⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠙⠲⠤⠖⠚⠉⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀  Visualizing...
 {RESET}"""
 
 # Ghost shown when any training command starts
@@ -98,52 +120,43 @@ def epoch_bar(epoch: int, total: int,
               interval: int = 20,
               prefix: str = "  ") -> None:
     """
-    Print an animated progress bar that fills 0→100% within each interval,
-    then locks in place (newline) when the interval is complete.
+    Single-line progress bar that fills 0→100% across FULL training.
 
-    Call this every epoch. It uses \\r to overwrite the current line while
-    filling within the interval, then prints a newline at interval boundaries.
-
-    interval: epochs between each locked checkpoint line (default 20)
+    Between validation boundaries: shows epoch/total + bar + loss.
+    At validation boundaries: same line but with metrics, printed as newline.
+    Uses \\r to overwrite between boundaries.
     """
-    # Bar and percentage based on overall progress (0 → 100% across full training)
-    overall_pct = epoch / total
-    filled = int(BAR_WIDTH * overall_pct)
-    bar    = "█" * filled + "░" * (BAR_WIDTH - filled)
-    pct    = int(100 * overall_pct)
+    pct = epoch / total
+    filled = int(BAR_WIDTH * pct)
+    bar = "█" * filled + "░" * (BAR_WIDTH - filled)
+    pct_int = int(100 * pct)
 
-    bar_col = GREEN if overall_pct >= 0.5 else YELLOW
+    bar_col = GREEN if pct >= 0.5 else YELLOW
     bar_str = _c(bar, bar_col)
 
     parts = [
-        f"{prefix}{BOLD}Epoch {epoch:4d}/{total}{RESET}",
-        f"{bar_str} {_c(f'{pct:3d}%', GRAY)}",
+        f"{prefix}{BOLD}Epoch {epoch:3d}/{total}{RESET}",
+        f"{bar_str} {_c(f'{pct_int:3d}%', GRAY)}",
         f"Loss {_c(f'{loss:.4f}', CYAN)}",
     ]
 
-    if val_loss is not None:
-        parts.append(f"ValLoss {_c(f'{val_loss:.4f}', BLUE)}")
-    if oa is not None:
+    at_boundary = (epoch % interval == 0) or (epoch == total)
+
+    if at_boundary and oa is not None:
         col = GREEN if oa >= 0.9 else YELLOW if oa >= 0.7 else RED
         parts.append(f"OA {_c(f'{oa:.4f}', col)}")
-    if miou is not None:
+    if at_boundary and miou is not None:
         col = GREEN if miou >= 0.9 else YELLOW if miou >= 0.7 else RED
         parts.append(f"mIoU {_c(f'{miou:.4f}', col)}")
-    if aa is not None:
-        col = GREEN if aa >= 0.9 else YELLOW if aa >= 0.7 else RED
-        parts.append(f"AA {_c(f'{aa:.4f}', col)}")
-    if kappa is not None:
+    if at_boundary and kappa is not None:
         col = GREEN if kappa >= 0.9 else YELLOW if kappa >= 0.7 else RED
         parts.append(f"κ {_c(f'{kappa:.4f}', col)}")
 
     line = " | ".join(parts)
 
-    at_boundary = (epoch % interval == 0) or (epoch == total)
     if at_boundary:
-        # Lock this line — move to next line
         print(f"\r{line}")
     else:
-        # Overwrite current line — no newline
         print(f"\r{line}", end="", flush=True)
 
 
@@ -173,19 +186,52 @@ def node_banner(node_id: str, node_classes: list, num_classes: int,
     return "\n".join(lines)
 
 
+def gpu_stats() -> str:
+    """Get real GPU stats (temp, utilization, VRAM) via nvidia-smi."""
+    try:
+        out = subprocess.check_output(
+            ['nvidia-smi',
+             '--query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total',
+             '--format=csv,noheader,nounits'],
+            timeout=5, stderr=subprocess.DEVNULL
+        ).decode().strip().split(',')
+        temp, util, used, total = [s.strip() for s in out]
+        return f"GPU {temp}°C | {used} / {total} MB | {util}% util"
+    except Exception:
+        return ""
+
+
 def forest_done_line(forest_idx: int, num_forests: int,
-                     best_miou: float, node_elapsed: str,
-                     global_elapsed: str, vram: str) -> str:
+                     best_miou: float, best_epoch: int,
+                     best_oa: float, best_aa: float, best_kappa: float,
+                     elapsed: str) -> str:
     miou_col = GREEN if best_miou >= 0.65 else YELLOW if best_miou >= 0.45 else RED
+    oa_col   = GREEN if best_oa >= 0.9 else YELLOW if best_oa >= 0.7 else RED
+    aa_col   = GREEN if best_aa >= 0.9 else YELLOW if best_aa >= 0.7 else RED
+    k_col    = GREEN if best_kappa >= 0.85 else YELLOW if best_kappa >= 0.65 else RED
+    gpu = gpu_stats()
+    hw_line = f"    {GRAY}{elapsed} elapsed{f' | {gpu}' if gpu else ''}{RESET}"
     return (
         f"  {GREEN}✓{RESET} Forest {forest_idx+1}/{num_forests} done"
-        f"  Best mIoU {_c(f'{best_miou:.4f}', miou_col)}"
-        f"  {GRAY}node {node_elapsed}  total {global_elapsed}  {vram}{RESET}"
+        f"  Best @ epoch {BOLD}{best_epoch}{RESET}"
+        f"  mIoU {_c(f'{best_miou:.4f}', miou_col)}"
+        f"  OA {_c(f'{best_oa:.4f}', oa_col)}"
+        f"  AA {_c(f'{best_aa:.4f}', aa_col)}"
+        f"  κ {_c(f'{best_kappa:.4f}', k_col)}"
+        f"\n{hw_line}"
     )
 
 
 def print_logo():
     print(GHOST_LOGO)
+
+
+def print_predict_start():
+    print(GHOST_PREDICT)
+
+
+def print_visualize_start():
+    print(GHOST_FLOWER)
 
 
 def print_training_start():
@@ -194,6 +240,19 @@ def print_training_start():
 
 def print_training_done():
     print(GHOST_DONE)
+
+
+def print_config_box(title: str, items: list[tuple[str, str]]):
+    """
+    Print a styled ═══ config box.
+    items: list of (label, value) tuples.
+    """
+    W = 60
+    print(f"\n{BOLD}{'═' * W}{RESET}")
+    print(f"  {BOLD}{CYAN}{title}{RESET}")
+    for label, value in items:
+        print(f"  {label:<14}: {value}")
+    print(f"{BOLD}{'═' * W}{RESET}")
 
 
 def print_results_box(metrics: dict, routing: str = None):
@@ -255,16 +314,15 @@ def print_save_and_next(out_dir: str, save_file: str,
     model_path = f"{out_dir}/{save_file}"
     print(f"\n{GREEN}{BOLD}  Saved →{RESET} {model_path}")
     print(f"\n{BOLD}{CYAN}  What's next?{RESET}")
-    print(f"{GRAY}  ┌─ Evaluate all routing modes:{RESET}")
-    print(f"  │  ghost predict \\")
-    print(f"  │    --data  {data_path} \\")
-    print(f"  │    --gt    {gt_path} \\")
-    print(f"  │    --model {model_path} \\")
-    print(f"  │    --routing all --out-dir {out_dir}")
-    print(f"{GRAY}  │{RESET}")
-    print(f"{GRAY}  └─ Visualize predictions:{RESET}")
-    print(f"     ghost visualize \\")
-    print(f"       --data  {data_path} \\")
-    print(f"       --gt    {gt_path} \\")
-    print(f"       --model {model_path} \\")
-    print(f"       --out-dir {out_dir}\n")
+    print(f"\n{GRAY}  # Evaluate all routing modes:{RESET}")
+    print(f"  ghost predict \\")
+    print(f"    --data  {data_path} \\")
+    print(f"    --gt    {gt_path} \\")
+    print(f"    --model {model_path} \\")
+    print(f"    --routing all --out-dir {out_dir}")
+    print(f"\n{GRAY}  # Visualize predictions:{RESET}")
+    print(f"  ghost visualize \\")
+    print(f"    --data  {data_path} \\")
+    print(f"    --gt    {gt_path} \\")
+    print(f"    --model {model_path} \\")
+    print(f"    --out-dir {out_dir}\n")

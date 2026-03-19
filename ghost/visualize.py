@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 import pickle
 import numpy as np
 import scipy.io
@@ -11,6 +12,10 @@ import torch
 from ghost.datasets.hyperspectral_dataset import HyperspectralDataset
 from ghost.models.spectral_ssm import SpectralSSMEncoder
 from ghost.rssp.rssp_inference import run_inference
+from ghost.utils.display import (
+    print_visualize_start, print_config_box,
+    BOLD, RESET, CYAN, GRAY, GREEN
+)
 
 
 # ── Dataset-specific class names ──────────────────────────────────────────────
@@ -154,9 +159,28 @@ def main():
     parser.add_argument('--title',       type=str,   default='GHOST Segmentation')
 
     args = parser.parse_args()
+
+    print_visualize_start()
+
     os.makedirs(args.out_dir, exist_ok=True)
 
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    device_str = str(DEVICE)
+    if torch.cuda.is_available() and DEVICE.type == 'cuda':
+        gpu_name = torch.cuda.get_device_name(0)
+        total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        device_str = f"cuda ({gpu_name}, {total_mem:.0f} GB)"
+
+    print_config_box("GHOST Visualize", [
+        ("Device",  device_str),
+        ("Model",   args.model),
+        ("Data",    args.data),
+        ("Routing", args.routing),
+        ("Dataset", args.dataset or "auto"),
+    ])
+
+    t0 = time.time()
 
     # Load dataset
     test_ds = HyperspectralDataset(
@@ -220,6 +244,9 @@ def main():
         g_band      = args.g_band,
         b_band      = args.b_band,
     )
+
+    elapsed = time.time() - t0
+    print(f"\n  {GRAY}Total visualize time: {elapsed:.1f}s{RESET}")
 
 
 if __name__ == '__main__':

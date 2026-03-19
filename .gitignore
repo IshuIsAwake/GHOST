@@ -7,6 +7,12 @@ __pycache__/
 dist/
 build/
 
+# Cython build artifacts
+*.c
+!ghost/data/
+*.so
+*.pyd
+
 # Virtual environments
 .env
 .venv
@@ -24,8 +30,13 @@ runs/
 .ipynb_checkpoints/
 *.ipynb
 
-# Data
+# Data (external datasets — bundled data lives in ghost/data/)
 data/
+
+# Large files / downloads
+*.zip
+*.tar.gz
+*.tar.bz2
 
 # OS
 .DS_Store
@@ -34,3 +45,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Scratch / personal notes
+commands.md
+context.md

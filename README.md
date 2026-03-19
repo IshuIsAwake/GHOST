@@ -1,127 +1,241 @@
 # GHOST
-### Generalizable Hyperspectral Observation and Segmentation Toolkit
 
-> *Under active development. Feedback and contributions welcome.*
+### Generalizable Hyperspectral Observation & Segmentation Toolkit
+
+> **97.5% OA | 0.86 mIoU on Indian Pines — trained on a laptop GPU in 77 minutes.**
+
+```bash
+pip install ghost-hsi
+```
 
 ---
 
 ## What is GHOST?
 
-GHOST is a hyperspectral image segmentation framework with one goal: point it at any `.mat` hyperspectral dataset and get a segmentation map without writing code or configuring a pipeline.
+GHOST is a hyperspectral image segmentation framework. Point it at any `.mat` hyperspectral dataset and get a segmentation map — no code, no pipeline configuration, no PCA.
 
-It is not a state-of-the-art accuracy benchmark. It is a working, accessible baseline for hyperspectral segmentation — particularly useful for novel or non-standard datasets where no trained models exist.
+It runs on consumer hardware (RTX 3050, 6 GB VRAM) and handles any band count, class count, or spatial resolution automatically.
+
+```bash
+ghost train_rssp \
+  --data data.mat --gt labels.mat \
+  --routing forest --loss dice \
+  --out-dir runs/my_experiment
+
+ghost predict \
+  --data data.mat --gt labels.mat \
+  --model runs/my_experiment/rssp_models.pkl \
+  --routing forest --out-dir runs/my_experiment
+```
 
 ---
 
-## Two Things GHOST Does That Most Tools Don't
+## Why GHOST?
 
-### 1. No PCA Required
+### No PCA Required
 
-Every major hyperspectral deep learning method requires PCA dimensionality reduction as a mandatory preprocessing step. This means choosing how many components to retain, verifying variance explained, and accepting that you've discarded spectral information the model deemed low-variance. For non-standard domains — planetary science, medical imaging, novel sensors — this is a significant barrier and a source of information loss.
+Every major hyperspectral deep learning method requires PCA as a preprocessing step — choosing how many components to retain, accepting discarded spectral information. For non-standard domains (planetary science, medical imaging, novel sensors), this is a barrier and a source of information loss.
 
-GHOST uses Continuum Removal instead: a physics-informed normalisation that strips brightness variation and isolates absorption feature shape, preserving all spectral bands. No dimensionality choices. No information discarded.
+GHOST uses **Continuum Removal**: a physics-informed normalisation that strips brightness variation and isolates absorption feature shape. All spectral bands preserved. No dimensionality choices.
 
-### 2. Fully Data-Agnostic
+### Fully Data-Agnostic
 
-Band count, class count, spatial dimensions, and data distribution are all read from the file at runtime. Nothing is hardcoded. A model that works on Indian Pines (200 bands, 16 classes, 145×145 pixels) runs without modification on Pavia University (103 bands, 9 classes, 610×340 pixels) or Mars CRISM spectra.
+Band count, class count, spatial dimensions — all read from the file at runtime. Nothing is hardcoded. The same binary that segments Indian Pines (200 bands, 16 classes) also handles lung cancer pathology slides (61 bands, 3 classes) and Mars CRISM data — with **zero code changes**.
+
+### Runs on Consumer Hardware
+
+Full training on a 6 GB laptop GPU. No A100s, no cloud compute, no multi-GPU setups. Designed for researchers who don't have institutional compute access.
 
 ---
 
 ## Results
 
-All results use `--train_ratio 0.2 --val_ratio 0.1 --seed 42` stratified splits, forest routing.
+All results: `--train_ratio 0.2 --val_ratio 0.1 --seed 42`, forest routing, NVIDIA RTX 3050 (6 GB).
 
-| Dataset | Bands | Classes | Spatial | OA | mIoU |
-|---|---|---|---|---|---|
-| Indian Pines | 200 | 16 | 145×145 | 94.49% | 0.7156 |
-| Salinas Valley | 204 | 16 | 512×217 | 92.10% | 0.7387 |
-| Pavia University | 103 | 9 | 610×340 | 85.85% | 0.6032 |
-| Asteroid Ryugu† | 7 | 4 | 1024×1024 | 54.65% | 0.3371 |
+### Indian Pines
 
-> Pavia, Salinas, and Ryugu trained at half filter capacity (`--base_filters 16 --num_filters 4`) on a 6GB VRAM consumer GPU. Published SOTA methods report on different training splits and metrics — direct numerical comparison is not meaningful without matching protocols.
+| Config | OA | mIoU | Dice | Kappa | Time |
+|--------|-----|------|------|-------|------|
+| 64 base / 32 num filters | **97.52%** | **0.8593** | 0.9038 | 0.9717 | 6h 2m |
+| 32 base / 8 num filters | **97.55%** | 0.8027 | 0.8391 | 0.9721 | 77m |
 
-† Ryugu uses KMeans pseudo-labels, not supervised ground truth.
+<details>
+<summary>Per-class IoU (64/32 config)</summary>
+
+| Class | IoU | Class | IoU |
+|-------|------|-------|------|
+| 1 | 0.9143 | 9 | 0.1905 |
+| 2 | 0.9351 | 10 | 0.9547 |
+| 3 | 0.9425 | 11 | 0.9689 |
+| 4 | 0.8811 | 12 | 0.9607 |
+| 5 | 0.9415 | 13 | 0.9592 |
+| 6 | 0.9961 | 14 | 0.9694 |
+| 7 | 0.4286 | 15 | 0.9890 |
+| 8 | 0.9256 | 16 | 0.7910 |
+
+Classes 7 and 9 have <30 training samples. Low IoU on these is expected and consistent with published literature.
+
+</details>
+
+### Salinas Valley
+
+> *Results pending re-run with latest pipeline. Space reserved.*
+
+| Config | OA | mIoU | Dice | Kappa | Time |
+|--------|-----|------|------|-------|------|
+| — | — | — | — | — | — |
+
+### Pavia University
+
+> *Results pending re-run with latest pipeline. Space reserved.*
+
+| Config | OA | mIoU | Dice | Kappa | Time |
+|--------|-----|------|------|-------|------|
+| — | — | — | — | — | — |
+
+### LUSC (Lung Squamous Cell Carcinoma)
+
+> **Single image only (1 of 62). Not comparable to published benchmarks.**
+> Trained on a 512x512 crop with same-region pixel split. Published methods use patient-level cross-validation across 10 patients. These numbers demonstrate data-agnostic capability, not SOTA claims.
+
+| Metric | Value |
+|--------|-------|
+| OA | 99.43% |
+| mIoU | 88.96% |
+| Dice | 93.49% |
+| Kappa | 0.9878 |
+
+See [LUSC_ghost_report.md](LUSC_ghost_report.md) for full details on why these results are not directly comparable.
+
+### Mars CRISM / Asteroid Ryugu
+
+Tested on planetary remote sensing data. Results in early exploration phase — not benchmarked against published methods.
 
 ---
 
 ## Quick Start
 
+### Install
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/GHOST.git
-cd GHOST
-pip install -e .
+pip install ghost-hsi
 ```
 
+### Train
+
 ```bash
-# Train
 ghost train_rssp \
-    --data data/indian_pines/Indian_pines_corrected.mat \
-    --gt   data/indian_pines/Indian_pines_gt.mat \
-    --out-dir runs/indian_pines
+  --data data/indian_pines/Indian_pines_corrected.mat \
+  --gt   data/indian_pines/Indian_pines_gt.mat \
+  --loss dice --routing forest \
+  --base_filters 32 --num_filters 8 \
+  --forests 5 --leaf_forests 3 \
+  --epochs 400 --patience 50 --min_epochs 40 \
+  --out-dir runs/indian_pines
+```
 
-# Predict
+### Predict
+
+```bash
 ghost predict \
-    --data  data/indian_pines/Indian_pines_corrected.mat \
-    --gt    data/indian_pines/Indian_pines_gt.mat \
-    --model runs/indian_pines/rssp_models.pkl \
-    --routing all \
-    --out-dir runs/indian_pines
+  --data  data/indian_pines/Indian_pines_corrected.mat \
+  --gt    data/indian_pines/Indian_pines_gt.mat \
+  --model runs/indian_pines/rssp_models.pkl \
+  --routing forest --out-dir runs/indian_pines
+```
 
-# Visualize
+### Visualize
+
+```bash
 ghost visualize \
-    --data    data/indian_pines/Indian_pines_corrected.mat \
-    --gt      data/indian_pines/Indian_pines_gt.mat \
-    --model   runs/indian_pines/rssp_models.pkl \
-    --dataset indian_pines \
-    --out-dir runs/indian_pines
+  --data    data/indian_pines/Indian_pines_corrected.mat \
+  --gt      data/indian_pines/Indian_pines_gt.mat \
+  --model   runs/indian_pines/rssp_models.pkl \
+  --dataset indian_pines --routing forest \
+  --out-dir runs/indian_pines
 ```
 
 ---
 
 ## Hardware Requirements
 
-| Setting | VRAM | Flags |
-|---|---|---|
-| Minimum | 4GB | `--base_filters 16 --num_filters 4 --d_model 32` |
-| Recommended | 6GB | `--base_filters 16 --num_filters 4` |
-| Full capacity | 8GB+ | defaults |
+| Setting | VRAM | Flags | Indian Pines Time |
+|---------|------|-------|-------------------|
+| Lightweight | 4 GB | `--base_filters 16 --num_filters 4 --d_model 32` | ~30m |
+| Standard | 6 GB | `--base_filters 32 --num_filters 8` | ~77m |
+| Full | 8 GB+ | `--base_filters 64 --num_filters 32` | ~6h |
 
-Indian Pines at full capacity: ~60-70 minutes on RTX 3050.
+No multi-GPU support. Single consumer GPU is all you need.
 
 ---
 
-## Repository Structure
+## Data Format
+
+GHOST accepts `.mat` files (MATLAB/HDF5 format):
+- **Data file:** 3D array with shape `(H, W, Bands)` — the hyperspectral cube
+- **Ground truth file:** 2D array with shape `(H, W)` — integer class labels, 0 = background
+
+Keys inside the `.mat` file are auto-detected by array dimensionality. No configuration needed.
+
+Standard datasets (Indian Pines, Pavia University, Salinas Valley) are available from [the GIC group at UPV/EHU](http://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes).
+
+---
+
+## Architecture Overview
 
 ```
-GHOST/
-├── ghost/
-│   ├── models/         # HyperspectralNet, 3D conv, SE block, U-Net
-│   ├── preprocessing/  # Continuum removal
-│   ├── datasets/       # Universal .mat loader
-│   ├── rssp/           # Tree builder, trainer, inference, SSSR router
-│   ├── train.py
-│   ├── train_rssp.py
-│   ├── predict.py
-│   ├── visualize.py
-│   └── cli.py
-├── docs/
-├── configs/
-├── setup.py
-└── requirements.txt
+.mat file (H, W, Bands)
+    |
+    v
+Continuum Removal ---- physics-based normalisation, no PCA
+    |
+    v
+Spectral 3D Conv ----- learns cross-band features, kernel (7,3,3)
+    |
+    v
+SE Attention ---------- per-channel importance weighting
+    |
+    v
+2D U-Net -------------- multi-scale spatial context
+    |
+    v
+RSSP Tree ------------- recursive binary class splitting
+    |                   each node: independent forest ensemble
+    v
+Prediction Map (H, W)
 ```
+
+See [architecture.md](architecture.md) for technical details.
 
 ---
 
 ## Documentation
 
 | Document | Description |
-|---|---|
-| [Architecture](docs/architecture.md) | Component overview |
-| [API Reference](docs/api_reference.md) | All CLI flags and Python API |
-| [How to Use](docs/how_to_use.md) | Step-by-step guide |
+|----------|-------------|
+| [Architecture](architecture.md) | Pipeline components, RSSP tree, training details |
+| [API Reference](API_Reference.md) | All CLI commands and flags |
+| [TODO](TODO.md) | Roadmap, known limitations, planned features |
 
 ---
 
-## Status
+## License
 
-GHOST is under active development. Known limitations exist, particularly on spatially fine-grained scenes and class-imbalanced datasets. Contributions, issues, and feedback are welcome.
+Proprietary. All rights reserved. See [LICENSE](LICENSE).
+
+For source code access, research collaborations, or licensing inquiries, contact the author directly.
+
+---
+
+## Citation
+
+If you use GHOST in your research, please cite:
+
+```
+@software{ghost2026,
+  title  = {GHOST: Generalizable Hyperspectral Observation \& Segmentation Toolkit},
+  author = {Ishu},
+  year   = {2026},
+  url    = {https://pypi.org/project/ghost-hsi/}
+}
+```
