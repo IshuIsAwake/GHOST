@@ -27,13 +27,14 @@ jobs:
           # Skip 32-bit builds and musl (Alpine) — not common for scientific Python
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
 
-          # Build dependencies (installed in each build environment)
-          CIBW_BUILD_REQUIRES: "cython>=3.0 setuptools>=68.0 wheel"
+          # Install Cython before each wheel build (needed for compilation)
+          CIBW_BEFORE_BUILD: "pip install cython>=3.0"
 
           # Test the built wheel with a basic import
-          CIBW_TEST_COMMAND: "python -c \"from ghost.cli import main; from ghost import __version__; print(f'ghost-hsi v{__version__} OK')\""
+          CIBW_TEST_COMMAND: >-
+            python -c "from ghost.cli import main; from ghost import __version__; print(f'ghost-hsi v{__version__} OK')"
 
-          # macOS: build universal2 (Intel + Apple Silicon)
+          # macOS: build for Intel and Apple Silicon separately
           CIBW_ARCHS_MACOS: "x86_64 arm64"
 
           # Linux: x86_64 only (add aarch64 later if needed)

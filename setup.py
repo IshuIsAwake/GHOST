@@ -1,15 +1,24 @@
 """
 setup.py — Cython-compiled build for ghost-hsi.
 
-Compiles all .py → .so/.pyd via Cython. The .py source files are stripped
-from the final wheel so only compiled binaries ship to users.
+When Cython is available (CI wheels):
+  Compiles all .py → .so/.pyd and strips source from the wheel.
+
+When Cython is NOT available (pip install from sdist on user machines):
+  Falls back to a pure-Python install — no compilation, .py files ship as-is.
 """
 import os
 import sysconfig
 from pathlib import Path
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext as _build_ext
-from Cython.Build import cythonize
+
+# ── Try Cython — graceful fallback if not installed ──────────────────────
+try:
+    from Cython.Build import cythonize
+    HAS_CYTHON = True
+except ImportError:
+    HAS_CYTHON = False
 
 
 # ── Collect every .py under ghost/ (except __init__.py) ──────────────────
@@ -55,15 +64,21 @@ class StripAfterCompile(_build_ext):
         print(f"Stripped {stripped} .py source files (compiled .so exist)")
 
 
-ext_modules = cythonize(
-    collect_extensions(),
-    compiler_directives={"language_level": "3"},
-    nthreads=os.cpu_count() or 4,
-)
+# ── Build config ─────────────────────────────────────────────────────────
+if HAS_CYTHON:
+    ext_modules = cythonize(
+        collect_extensions(),
+        compiler_directives={"language_level": "3"},
+        nthreads=os.cpu_count() or 4,
+    )
+    cmdclass = {"build_ext": StripAfterCompile}
+else:
+    ext_modules = []
+    cmdclass = {}
 
 setup(
     ext_modules=ext_modules,
     packages=find_packages(include=["ghost*"]),
     package_data={"ghost": ["configs/*.yaml", "data/indian_pines/*.mat"]},
-    cmdclass={"build_ext": StripAfterCompile},
+    cmdclass=cmdclass,
 )
