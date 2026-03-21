@@ -1,14 +1,14 @@
 """
 setup.py — Cython-compiled build for ghost-hsi.
 
-Compiles all .py → .so via Cython. The .py source files are stripped
+Compiles all .py → .so/.pyd via Cython. The .py source files are stripped
 from the final wheel so only compiled binaries ship to users.
 """
 import os
-import shutil
+import sysconfig
 from pathlib import Path
 from setuptools import setup, find_packages, Extension
-from setuptools.command.build_py import build_py as _build_py
+from setuptools.command.build_ext import build_ext as _build_ext
 from Cython.Build import cythonize
 
 
@@ -25,27 +25,34 @@ def collect_extensions(root="ghost"):
     return extensions
 
 
-class StripSourceBuildPy(_build_py):
-    """Custom build_py that removes .py and .c files from the wheel.
+class StripAfterCompile(_build_ext):
+    """Strip .py source and .c intermediates ONLY after .so/.pyd compilation succeeds.
 
-    Only __init__.py files and compiled .so extensions survive.
+    Runs after build_ext (which runs after build_py), so both .py and .so
+    exist in build_lib at this point. Only removes .py if its compiled
+    counterpart was actually produced — prevents shipping an empty package
+    if Cython compilation fails.
     """
-    def build_packages(self):
-        super().build_packages()
-        compiled = {
-            ext.name.replace(".", os.sep) + ".py"
-            for ext in collect_extensions()
-        }
-        build_lib = Path(self.build_lib)
-        # Remove .py source files that have compiled .so counterparts
-        for py_rel in compiled:
-            py_path = build_lib / py_rel
-            if py_path.exists():
+    def run(self):
+        super().run()
+        build_lib  = Path(self.build_lib)
+        ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')  # e.g. .cpython-312-x86_64-linux-gnu.so
+
+        stripped = 0
+        for ext in self.extensions:
+            mod_path = ext.name.replace('.', os.sep)
+            so_path  = build_lib / (mod_path + ext_suffix)
+            py_path  = build_lib / (mod_path + '.py')
+
+            if so_path.exists() and py_path.exists():
                 py_path.unlink()
-        # Remove ALL .c files — these are Cython intermediates and
-        # can be reverse-read to understand the original Python logic
+                stripped += 1
+
+        # Remove .c Cython intermediates (can be reverse-read)
         for c_file in build_lib.rglob("*.c"):
             c_file.unlink()
+
+        print(f"Stripped {stripped} .py source files (compiled .so exist)")
 
 
 ext_modules = cythonize(
@@ -58,5 +65,5 @@ setup(
     ext_modules=ext_modules,
     packages=find_packages(include=["ghost*"]),
     package_data={"ghost": ["configs/*.yaml", "data/indian_pines/*.mat"]},
-    cmdclass={"build_py": StripSourceBuildPy},
+    cmdclass={"build_ext": StripAfterCompile},
 )
