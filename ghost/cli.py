@@ -13,6 +13,11 @@ def main():
         description="GHOST: Generalizable Hyperspectral Observation & Segmentation Toolkit",
         usage="ghost <command> [<args>]"
     )
+    from ghost import __version__
+    parser.add_argument(
+        '-v', '--version', action='version',
+        version=f'ghost-hsi {__version__}'
+    )
     parser.add_argument(
         'command',
         help='Subcommand: train | train_rssp | predict | visualize | boo | flower'
@@ -68,7 +73,8 @@ def main():
 
     else:
         print(f"{BOLD}Unrecognized command: '{args.command}'{RESET}")
-        print(f"{GRAY}Available commands: train | train_rssp | predict | visualize | demo | version | boo | flower{RESET}")
+        print(f"{GRAY}Available commands: train | train_rssp | predict | visualize | demo | version | boo | flower")
+        print(f"Use 'ghost --version' or 'ghost version' to check installed version{RESET}")
         parser.print_help()
         sys.exit(1)
 

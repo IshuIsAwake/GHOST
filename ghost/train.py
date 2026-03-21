@@ -66,9 +66,11 @@ def main():
     val_ds   = HyperspectralDataset(args.data, args.gt, split='val',   train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed, use_fp16=args.fp16)
     test_ds  = HyperspectralDataset(args.data, args.gt, split='test',  train_ratio=args.train_ratio, val_ratio=args.val_ratio, seed=args.seed, use_fp16=args.fp16)
 
-    train_loader = DataLoader(train_ds, batch_size=1, shuffle=False)
-    val_loader   = DataLoader(val_ds,   batch_size=1, shuffle=False)
-    test_loader  = DataLoader(test_ds,  batch_size=1, shuffle=False)
+    _dl_kwargs = dict(batch_size=1, shuffle=False, num_workers=2,
+                      pin_memory=torch.cuda.is_available(), persistent_workers=True)
+    train_loader = DataLoader(train_ds, **_dl_kwargs)
+    val_loader   = DataLoader(val_ds,   **_dl_kwargs)
+    test_loader  = DataLoader(test_ds,  **_dl_kwargs)
 
     # ── Model ─────────────────────────────────────────────────────────────────────
     model = HyperspectralNet(
@@ -164,7 +166,7 @@ def main():
             scaler.step(optimizer)
             scaler.update()
 
-        scheduler.step(loss)
+        scheduler.step(loss.item())
 
         if epoch % 10 == 0:
             model.eval()
@@ -182,19 +184,21 @@ def main():
                       oa=val_oa, miou=val_miou,
                       aa=val_aa, kappa=val_kappa,
                       interval=10)
-        else:
-            epoch_bar(epoch, args.epochs, loss.item(), interval=10)
 
+            # Log metrics to CSV on validation epochs
             with open(os.path.join(args.out_dir, args.log), 'a', newline='') as f:
-                csv.writer(f).writerow([epoch, f"{loss:.4f}", f"{val_loss:.4f}",
+                csv.writer(f).writerow([epoch, f"{loss.item():.4f}", f"{val_loss.item():.4f}",
                                         f"{val_oa:.4f}", f"{val_miou:.4f}", f"{val_dice:.4f}",
                                         f"{val_precision:.4f}", f"{val_recall:.4f}",
                                         f"{val_aa:.4f}", f"{val_kappa:.4f}"])
 
+            # Save best model checkpoint
             if val_miou > best_val_miou:
                 best_val_miou = val_miou
                 best_epoch    = epoch
                 torch.save(model.state_dict(), os.path.join(args.out_dir, args.save))
+        else:
+            epoch_bar(epoch, args.epochs, loss.item(), interval=10)
 
     # ── Test ──────────────────────────────────────────────────────────────────────
     model.load_state_dict(torch.load(os.path.join(args.out_dir, args.save), weights_only=True))

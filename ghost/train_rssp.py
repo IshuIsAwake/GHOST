@@ -262,6 +262,17 @@ def main():
         'kappa':     kappa,
     }, routing=args.routing)
 
+    # ── Save final test metrics CSV ─────────────────────────────────────────
+    test_results_csv = os.path.join(args.out_dir, 'test_results.csv')
+    with open(test_results_csv, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['routing', 'OA', 'mIoU', 'Dice', 'Precision', 'Recall', 'AA', 'kappa'])
+        writer.writerow([args.routing,
+                         f"{oa:.6f}", f"{miou:.6f}", f"{dice:.6f}",
+                         f"{precision:.6f}", f"{recall:.6f}",
+                         f"{aa:.6f}", f"{kappa:.6f}"])
+    print(f"  {GREEN}Saved →{RESET} {test_results_csv}")
+
     class_ious = per_class_iou(final_pred, eval_labels, num_classes)
     print_per_class_iou(class_ious)
 

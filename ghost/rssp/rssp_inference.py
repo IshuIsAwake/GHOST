@@ -15,7 +15,7 @@ def get_global_soft_probs(node_info: dict, data: torch.Tensor,
     local_to_global = forests[0]['local_to_global']
     B, _, H, W      = data.shape
 
-    prob_sum = torch.zeros(B, forests[0]['num_classes'], H, W)
+    prob_sum = torch.zeros(B, forests[0]['num_classes'], H, W, device=device)
 
     for info in forests:
         model = HyperspectralNet(
@@ -29,14 +29,14 @@ def get_global_soft_probs(node_info: dict, data: torch.Tensor,
         model.eval()
 
         with torch.no_grad():
-            logits   = model(data.to(device)).cpu()
+            logits    = model(data.to(device))
             prob_sum += F.softmax(logits, dim=1)
 
         del model
         if device != 'cpu':
             torch.cuda.empty_cache()
 
-    prob_avg = prob_sum / len(forests)
+    prob_avg = (prob_sum / len(forests)).cpu()
 
     global_probs = torch.zeros(B, num_global_classes, H, W)
     for local_id, global_id in local_to_global.items():
@@ -80,7 +80,9 @@ def cascade_soft_inference(tree: dict,
     if fingerprints is None and routing in ('hybrid', 'soft'):
         ssm_encoder.eval()
         with torch.no_grad():
-            fingerprints = ssm_encoder(data.to(device)).cpu()
+            fp_gpu = ssm_encoder(data.to(device))
+            fingerprints = fp_gpu.cpu()
+            del fp_gpu
 
     if path_weight is None:
         path_weight = torch.ones(B, 1, H, W)

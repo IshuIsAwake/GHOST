@@ -165,8 +165,10 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
                       actual_forests, loss_type, focal_gamma,
                       train_ds.num_pixels, val_ds.num_pixels))
 
-    train_loader = DataLoader(train_ds, batch_size=1, shuffle=False)
-    val_loader   = DataLoader(val_ds,   batch_size=1, shuffle=False)
+    _dl_kwargs = dict(batch_size=1, shuffle=False, num_workers=2,
+                      pin_memory=(device != 'cpu'), persistent_workers=True)
+    train_loader = DataLoader(train_ds, **_dl_kwargs)
+    val_loader   = DataLoader(val_ds,   **_dl_kwargs)
 
     # Build criterion once per node
     criterion = build_criterion(
@@ -233,7 +235,7 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
 
             # Only step scheduler after warmup
             if epoch > warmup_epochs:
-                scheduler.step(loss)
+                scheduler.step(loss.item())
 
             if epoch % val_interval == 0 or epoch == epochs:
                 model.eval()
