@@ -31,6 +31,9 @@ jobs:
           # Install Cython before each wheel build (needed for compilation)
           CIBW_BEFORE_BUILD: "pip install cython>=3.0"
 
+          # Show full build output so Cython errors are visible
+          CIBW_BUILD_VERBOSITY: "1"
+
           # Test the built wheel with a basic import
           CIBW_TEST_COMMAND: >-
             python -c "from ghost.cli import main; from ghost import __version__; print(f'ghost-hsi v{__version__} OK')"
