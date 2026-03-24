@@ -21,14 +21,14 @@ ghost demo
 ```bash
 # Train (CE+Dice, forest routing)
 ghost train_rssp \
-  --data data/indian_pines/Indian_pines_corrected.mat \
-  --gt   data/indian_pines/Indian_pines_gt.mat \
+  --data GHOST/data/indian_pines/Indian_pines_corrected.mat \
+  --gt   GHOST/data/indian_pines/Indian_pines_gt.mat \
   --loss dice --routing forest \
   --base_filters 32 --num_filters 8 --num_blocks 3 \
   --forests 5 --leaf_forests 3 \
   --epochs 400 --patience 50 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir runs/indian_pines_ce_dice
+  --out-dir GHOST/runs/indian_pines_ce_dice
 
 # Predict
 ghost predict \

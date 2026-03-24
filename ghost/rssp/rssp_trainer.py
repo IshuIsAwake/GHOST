@@ -203,6 +203,11 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
             base_filters = base_filters
         ).to(device)
 
+        # channels_last_3d lets cuDNN pick faster Conv3D algorithms
+        if device != 'cpu':
+            model.spectral_3d.stack = model.spectral_3d.stack.to(
+                memory_format=torch.channels_last_3d)
+
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, patience=10, factor=0.5)

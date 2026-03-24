@@ -82,6 +82,11 @@ def main():
         use_fp16=args.fp16
     ).to(DEVICE)
 
+    # channels_last_3d lets cuDNN pick faster Conv3D algorithms
+    if DEVICE != 'cpu':
+        model.spectral_3d.stack = model.spectral_3d.stack.to(
+            memory_format=torch.channels_last_3d)
+
     print(f"Training on {DEVICE} | {'fp16 (mixed precision)' if args.fp16 else 'fp32 (full precision)'}")
     print(f"Bands: {train_ds.num_bands} | Classes: {train_ds.num_classes} | Parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Loss: {args.loss}" + (f" | gamma={args.focal_gamma}" if 'focal' in args.loss else "") + "\n")
