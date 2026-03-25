@@ -28,9 +28,6 @@ jobs:
           # Skip 32-bit builds and musl (Alpine) — not common for scientific Python
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
 
-          # Install Cython before each wheel build (needed for compilation)
-          CIBW_BEFORE_BUILD: "pip install cython>=3.0"
-
           # Show full build output so Cython errors are visible
           CIBW_BUILD_VERBOSITY: "1"
 
