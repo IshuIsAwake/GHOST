@@ -2,7 +2,7 @@
 
 ### Generalizable Hyperspectral Observation & Segmentation Toolkit
 
-> **97.5% OA | 0.86 mIoU on Indian Pines — trained on a laptop GPU in 77 minutes.**
+> **97% OA | 0.80 mIoU on Indian Pines — trained on a laptop GPU in 77 minutes.**
 
 ```bash
 pip install ghost-hsi
