@@ -1,7 +1,7 @@
 import sys
 import argparse
 from ghost.utils.display import (
-    print_logo, GHOST_BOO, GHOST_FLOWER, RESET, CYAN, BOLD, GRAY
+    print_logo, GHOST_FLOWER, RESET, CYAN, BOLD, GRAY
 )
 
 
@@ -20,7 +20,7 @@ def main():
     )
     parser.add_argument(
         'command',
-        help='Subcommand: train | train_rssp | predict | visualize | boo | flower'
+        help='Subcommand: train | train_spt | predict | visualize | demo | version | flower'
     )
 
     args, _ = parser.parse_known_args(sys.argv[1:2])
@@ -30,7 +30,7 @@ def main():
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         run_train()
 
-    elif args.command == 'train_rssp':
+    elif args.command in ('train_spt', 'train_rssp'):
         from ghost.train_rssp import main as run_train_rssp
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         run_train_rssp()
@@ -45,9 +45,6 @@ def main():
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         run_visualize()
 
-    elif args.command == 'boo':
-        print(GHOST_BOO)
-
     elif args.command == 'flower':
         print(f"{CYAN}{GHOST_FLOWER}{RESET}")
 
@@ -58,12 +55,12 @@ def main():
         print(f"  Data : {data_path}")
         print(f"  GT   : {gt_path}")
         print(f"\n{BOLD}{CYAN}Run this to start training:{RESET}")
-        print(f"\n  ghost train_rssp \\")
+        print(f"\n  ghost train_spt \\")
         print(f"    --data  {data_path} \\")
         print(f"    --gt    {gt_path} \\")
-        print(f"    --loss dice --routing forest \\")
+        print(f"    --loss dice \\")
         print(f"    --base_filters 32 --num_filters 8 \\")
-        print(f"    --forests 5 --leaf_forests 3 \\")
+        print(f"    --ensembles 5 --leaf_ensembles 3 \\")
         print(f"    --epochs 400 --patience 50 --min_epochs 40 \\")
         print(f"    --out-dir runs/indian_pines")
 
@@ -73,7 +70,7 @@ def main():
 
     else:
         print(f"{BOLD}Unrecognized command: '{args.command}'{RESET}")
-        print(f"{GRAY}Available commands: train | train_rssp | predict | visualize | demo | version | boo | flower")
+        print(f"{GRAY}Available commands: train | train_spt | predict | visualize | demo | version | flower")
         print(f"Use 'ghost --version' or 'ghost version' to check installed version{RESET}")
         parser.print_help()
         sys.exit(1)

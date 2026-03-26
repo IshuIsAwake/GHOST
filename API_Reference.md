@@ -8,21 +8,22 @@ ghost <command> [arguments]
 
 | Command | Description |
 |---------|-------------|
-| `ghost train` | Train a single flat model (no RSSP tree) |
-| `ghost train_rssp` | **Full GHOST pipeline** — tree + forests + routing |
+| `ghost train` | Train a single flat model (no SPT) |
+| `ghost train_spt` | **Full GHOST pipeline** — Spectral Partition Tree + ensembles |
 | `ghost predict` | Run inference on test split, compute metrics |
 | `ghost visualize` | Generate 3-panel segmentation figure |
+| `ghost demo` | Show bundled dataset paths and example command |
 | `ghost version` | Print version |
-| `ghost boo` | Easter egg |
+| `ghost flower` | Easter egg |
 
 ---
 
-## ghost train_rssp
+## ghost train_spt
 
-The primary training command. Builds RSSP tree, trains per-node forest ensembles.
+The primary training command. Builds the Spectral Partition Tree and trains per-node model ensembles.
 
 ```bash
-ghost train_rssp --data <path> --gt <path> [options]
+ghost train_spt --data <path> --gt <path> [options]
 ```
 
 ### Required
@@ -61,19 +62,19 @@ ghost train_rssp --data <path> --gt <path> [options]
 | `--val_interval` | `20` | Validate every N epochs |
 | `--seed` | `42` | Random seed |
 
-### RSSP Tree
+### SPT (Spectral Partition Tree)
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--depth` | `auto` | Tree depth. `auto`: stops at depth 3 or SAM < 0.05. `full`: always recurse. Integer: fixed max depth |
-| `--forests` | `5` | Forest ensemble size per internal node |
-| `--leaf_forests` | `3` | Forest ensemble size per leaf node (<=2 classes) |
+| `--ensembles` | `5` | Ensemble size per internal node |
+| `--leaf_ensembles` | `3` | Ensemble size per leaf node (<=2 classes) |
 
 ### Routing (Experimental)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--routing` | `hybrid` | Routing mode: `forest` (recommended), `hybrid`, `soft` |
+| `--routing` | `forest` | Routing mode: `forest` (recommended), `hybrid`, `soft` |
 | `--d_model` | `64` | SSM fingerprint dimensionality |
 | `--d_state` | `16` | SSM filters per branch |
 | `--ssm_epochs` | `300` | SSM pretraining epochs. Set to `1` when using `--routing forest` |
@@ -86,27 +87,27 @@ ghost train_rssp --data <path> --gt <path> [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--out-dir` | `.` | Output directory (created if needed) |
-| `--save` | `rssp_models.pkl` | Model bundle filename |
+| `--save` | `spt_models.pkl` | Model bundle filename |
 
 ### Output Files
 
 | File | Description |
 |------|-------------|
-| `rssp_models.pkl` | Complete model bundle: tree + all forests + SSM state |
+| `spt_models.pkl` | Complete model bundle: tree + all ensembles + SSM state |
 | `ssm_pretrained.pt` | Standalone SSM encoder weights |
 | `training_history.csv` | Epoch-by-epoch metrics for all nodes |
 
 ### Examples
 
-**Recommended (fast, best results):**
+**Recommended (fast, good results):**
 
 ```bash
-ghost train_rssp \
+ghost train_spt \
   --data data/indian_pines/Indian_pines_corrected.mat \
   --gt   data/indian_pines/Indian_pines_gt.mat \
-  --loss dice --routing forest \
+  --loss dice \
   --base_filters 32 --num_filters 8 \
-  --forests 5 --leaf_forests 3 \
+  --ensembles 5 --leaf_ensembles 3 \
   --epochs 400 --patience 50 --min_epochs 40 \
   --val_interval 20 \
   --out-dir runs/indian_pines
@@ -115,22 +116,22 @@ ghost train_rssp \
 **Low VRAM (4-6 GB):**
 
 ```bash
-ghost train_rssp \
+ghost train_spt \
   --data data.mat --gt labels.mat \
-  --loss dice --routing forest \
+  --loss dice \
   --base_filters 16 --num_filters 4 --d_model 32 \
-  --forests 3 --epochs 300 \
+  --ensembles 3 --epochs 300 \
   --out-dir runs/low_vram
 ```
 
 **Maximum accuracy (8+ GB, slow):**
 
 ```bash
-ghost train_rssp \
+ghost train_spt \
   --data data.mat --gt labels.mat \
-  --loss dice --routing forest \
+  --loss dice \
   --base_filters 64 --num_filters 32 \
-  --forests 5 --leaf_forests 3 \
+  --ensembles 5 --leaf_ensembles 3 \
   --epochs 400 --patience 50 \
   --out-dir runs/full_power
 ```
@@ -139,7 +140,7 @@ ghost train_rssp \
 
 ## ghost train
 
-Flat model training (no RSSP tree). Useful as a baseline.
+Flat model training (no SPT). Useful as a baseline.
 
 ```bash
 ghost train --data <path> --gt <path> [options]
@@ -147,7 +148,7 @@ ghost train --data <path> --gt <path> [options]
 
 ### Flags
 
-Same as `ghost train_rssp` for: `--data`, `--gt`, `--train_ratio`, `--val_ratio`, `--base_filters`, `--num_filters`, `--num_blocks`, `--epochs`, `--lr`, `--seed`, `--out-dir`, `--save`.
+Same as `ghost train_spt` for: `--data`, `--gt`, `--train_ratio`, `--val_ratio`, `--base_filters`, `--num_filters`, `--num_blocks`, `--epochs`, `--lr`, `--seed`, `--out-dir`, `--save`.
 
 Additional:
 
@@ -180,7 +181,7 @@ ghost predict --data <path> --gt <path> --model <path> [options]
 |------|-------------|
 | `--data` | Hyperspectral data `.mat` file |
 | `--gt` | Ground truth `.mat` file |
-| `--model` | Path to `rssp_models.pkl` from `ghost train_rssp` |
+| `--model` | Path to `spt_models.pkl` from `ghost train_spt` |
 
 ### Optional
 
@@ -197,7 +198,7 @@ ghost predict --data <path> --gt <path> --model <path> [options]
 
 | File | Description |
 |------|-------------|
-| `test_results_forest.csv` | OA, mIoU, Dice, Precision, Recall for forest routing |
+| `test_results_forest.csv` | OA, mIoU, Dice, Precision, Recall for ensemble routing |
 | `test_results_hybrid.csv` | Same for hybrid routing |
 | `test_results_soft.csv` | Same for soft routing |
 
@@ -207,7 +208,7 @@ ghost predict --data <path> --gt <path> --model <path> [options]
 ghost predict \
   --data  data/indian_pines/Indian_pines_corrected.mat \
   --gt    data/indian_pines/Indian_pines_gt.mat \
-  --model runs/indian_pines/rssp_models.pkl \
+  --model runs/indian_pines/spt_models.pkl \
   --routing forest --out-dir runs/indian_pines
 ```
 
@@ -227,7 +228,7 @@ ghost visualize --data <path> --gt <path> --model <path> [options]
 |------|-------------|
 | `--data` | Hyperspectral data `.mat` file |
 | `--gt` | Ground truth `.mat` file |
-| `--model` | Path to `rssp_models.pkl` |
+| `--model` | Path to `spt_models.pkl` |
 
 ### Optional
 
@@ -257,8 +258,8 @@ ghost visualize --data <path> --gt <path> --model <path> [options]
 ghost visualize \
   --data    data/indian_pines/Indian_pines_corrected.mat \
   --gt      data/indian_pines/Indian_pines_gt.mat \
-  --model   runs/indian_pines/rssp_models.pkl \
-  --dataset indian_pines --routing forest \
+  --model   runs/indian_pines/spt_models.pkl \
+  --dataset indian_pines \
   --title   "GHOST - Indian Pines" \
   --out-dir runs/indian_pines
 ```
@@ -267,13 +268,9 @@ ghost visualize \
 
 ## Configuration Presets
 
-Quick reference for common setups:
-
 | Scenario | Key Flags |
 |----------|-----------|
-| **First run / demo** | `--loss dice --routing forest --epochs 400 --patience 50` |
+| **First run / demo** | `--loss dice --epochs 400 --patience 50` |
 | **Low VRAM (4 GB)** | `--base_filters 16 --num_filters 4 --d_model 32` |
-| **Max accuracy** | `--base_filters 64 --num_filters 32 --forests 5` |
-| **Fast iteration** | `--base_filters 32 --num_filters 8 --epochs 200 --forests 3` |
-| **Skip SSM** | `--routing forest` (SSM pretraining auto-skipped) |
-| **Reuse SSM** | `--ssm_load path/to/ssm.pt` |
+| **Max accuracy** | `--base_filters 64 --num_filters 32 --ensembles 5` |
+| **Fast iteration** | `--base_filters 32 --num_filters 8 --epochs 200 --ensembles 3` |

@@ -216,7 +216,7 @@ def build_rssp_tree(data, labels, num_classes, depth_mode='auto',
     # Pixel counts per class
     pixel_counts = {c: int((labels == c).sum()) for c in classes}
     
-    print(f"Building RSSP tree for {len(classes)} classes")
+    print(f"Building Spectral Partition Tree for {len(classes)} classes")
     print(f"Pixel counts: { {c: pixel_counts[c] for c in classes} }")
     
     # Class mean spectra

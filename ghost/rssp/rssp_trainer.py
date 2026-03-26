@@ -341,10 +341,10 @@ def train_node(node, data, labels, total_classes, train_coords, val_coords,
 
         mious_str = "  ".join(f"{_c(f'{v:.4f}', GREEN if v >= 0.65 else YELLOW if v >= 0.45 else RED)}"
                               for v in forest_mious)
-        print(f"\n  {BOLD}Node '{node_id}'{RESET} — {actual_forests} forests trained in {total_time}")
+        print(f"\n  {BOLD}Node '{node_id}'{RESET} — {actual_forests} ensembles trained in {total_time}")
         print(f"  mIoU  {mious_str}   {GRAY}mean {mean_miou:.4f} ± {std_miou:.4f}{RESET}")
-        print(f"  {GREEN}Best{RESET}: Forest {best_idx+1} ({forest_mious[best_idx]:.4f})"
-              f"  {RED}Worst{RESET}: Forest {worst_idx+1} ({forest_mious[worst_idx]:.4f})"
+        print(f"  {GREEN}Best{RESET}: Ensemble {best_idx+1} ({forest_mious[best_idx]:.4f})"
+              f"  {RED}Worst{RESET}: Ensemble {worst_idx+1} ({forest_mious[worst_idx]:.4f})"
               f"  {GRAY}Early stops: {early_stop_count}/{actual_forests}{RESET}\n")
 
     # ── Train SSSR routing head (internal nodes only) ─────────────────────────

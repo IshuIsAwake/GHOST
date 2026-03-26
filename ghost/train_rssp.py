@@ -20,7 +20,7 @@ from ghost.utils.display import (
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description='GHOST RSSP + SSSR Training')
+    parser = argparse.ArgumentParser(description='GHOST SPT (Spectral Partition Tree) Training')
 
     # Data
     parser.add_argument('--data',         type=str,   required=True)
@@ -28,12 +28,12 @@ def main():
     parser.add_argument('--train_ratio',  type=float, default=0.2)
     parser.add_argument('--val_ratio',    type=float, default=0.1)
 
-    # RSSP tree
+    # SPT (Spectral Partition Tree)
     parser.add_argument('--depth',        type=str,   default='auto',
                         help='auto | full | integer')
 
-    # Forest
-    parser.add_argument('--forests',      type=int,   default=5)
+    # Ensembles
+    parser.add_argument('--ensembles',    type=int,   default=5, dest='forests')
     parser.add_argument('--base_filters', type=int,   default=32)
     parser.add_argument('--num_filters',  type=int,   default=8)
     parser.add_argument('--num_blocks',   type=int,   default=3)
@@ -56,9 +56,9 @@ def main():
     parser.add_argument('--min_epochs',   type=int,   default=40,
                         help='Never early-stop before this epoch (default: 40)')
 
-    # Forest count
-    parser.add_argument('--leaf_forests', type=int,   default=3,
-                        help='Number of forests for leaf nodes with ≤ 2 classes (default: 3)')
+    # Leaf ensemble count
+    parser.add_argument('--leaf_ensembles', type=int, default=3, dest='leaf_forests',
+                        help='Number of ensembles for leaf nodes with ≤ 2 classes (default: 3)')
 
     # LR warmup
     parser.add_argument('--warmup_epochs', type=int,  default=0,
@@ -75,19 +75,19 @@ def main():
     parser.add_argument('--ssm_lr',       type=float, default=1e-3)
     parser.add_argument('--ssm_save',     type=str,   default='ssm_pretrained.pt')
     parser.add_argument('--ssm_load',     type=str,   default=None)
-    parser.add_argument('--routing',      type=str,   default='hybrid',
+    parser.add_argument('--routing',      type=str,   default='forest',
                         choices=['hybrid', 'forest', 'soft'])
 
     # General
     parser.add_argument('--seed',         type=int,   default=42)
-    parser.add_argument('--save',         type=str,   default='rssp_models.pkl')
+    parser.add_argument('--save',         type=str,   default='spt_models.pkl')
     parser.add_argument('--out-dir',      type=str,   default='.')
 
     args = parser.parse_args()
 
-    # Skip expensive SSM pretraining when using forest-only routing
+    # Skip expensive SSM pretraining when using ensemble routing
     if args.routing == 'forest' and args.ssm_epochs > 1:
-        print("Forest-only routing selected — skipping SSM pretraining (set --ssm_epochs manually to override)")
+        print("Ensemble routing selected — skipping SSM pretraining (set --ssm_epochs manually to override)")
         args.ssm_epochs = 1
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -121,7 +121,7 @@ def main():
         device_str = f"cuda ({gpu_name}, {total_mem:.0f} GB)"
 
     loss_str = args.loss + (f" (gamma={args.focal_gamma})" if 'focal' in args.loss else "")
-    print_config_box("GHOST RSSP Training", [
+    print_config_box("GHOST SPT Training", [
         ("Device",       device_str),
         ("Loss",         loss_str),
         ("Routing",      args.routing),
@@ -187,7 +187,7 @@ def main():
     if depth_mode.isdigit():
         depth_mode = int(depth_mode)
 
-    print("\n=== Building RSSP Tree ===")
+    print("\n=== Building Spectral Partition Tree ===")
     tree, sam_matrix, means = build_rssp_tree(
         data.numpy(), labels.numpy(),
         num_classes=num_classes,
@@ -197,7 +197,7 @@ def main():
 
     # ── Train ─────────────────────────────────────────────────────────────────────
     print_training_start()
-    print(f"\n=== Training RSSP Forest + SSSR Routers (loss={args.loss}) ===")
+    print(f"\n=== Training SPT Ensembles (loss={args.loss}) ===")
     trained_models = train_tree(
         tree, data, labels,
         total_classes  = num_classes - 1,

@@ -53,13 +53,6 @@ GHOST_PREDICT = f"""{CYAN}{BOLD}
 ⠀  Predicting...
 {RESET}"""
 
-# Three-ghost boo screen
-GHOST_BOO = f"""{CYAN}{BOLD}
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠈⠈⠈⠈⠀⠀⠛⠀⠀⠙⠃⠀⠈⠋⠄⠀⠙⠁⠀⠘⠃⠀⠀⚄⠀⠀⠀⠀⠀⠀⠂⠀⠀⠙⠁⠀⠈⠂⠀⠀⠛⠀⠀⠈⠀⠀⠀⠂⠀⠀⠙⠁⠀⠈⠊⠀⠀⠛⠀⠀⠘⠃⠀⠀⠋
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠐⠀⠈⠀⠀⠠⠀⠀⠀⡄⠀⠀⠠⠀⠀⠀⠄⠀⠀⠄⠀⠀⠠⠀⠀⠀⡄⠀⠀⢠⠀⠀⠀⠄⠀⠀⠄⠀⠀⠠⠀⢀⣠⣶⣼⣿⣿⣿⣿⣿⣿⣶⣤⣤⠀⠀⠠⠀⠀⠀
-      B  O  O  !
-{RESET}"""
 
 GHOST_FLOWER = f"""{CYAN}
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⠤⠒⠒⠒⠒⠢⢄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -164,7 +157,7 @@ def epoch_bar(epoch: int, total: int,
 def forest_banner(forest_idx: int, num_forests: int, seed: int,
                   node_id: str) -> str:
     return (
-        f"\n  {BOLD}{CYAN}── Forest {forest_idx+1}/{num_forests}{RESET}"
+        f"\n  {BOLD}{CYAN}── Ensemble {forest_idx+1}/{num_forests}{RESET}"
         f"  seed={seed}  node='{node_id}'"
     )
 
@@ -180,7 +173,7 @@ def node_banner(node_id: str, node_classes: list, num_classes: int,
         f"  {BOLD}Node{RESET} {CYAN}'{node_id}'{RESET}",
         f"  Classes       : {node_classes}",
         f"  Local classes : {num_classes - 1}   Epochs: {epochs}   "
-        f"Forests: {num_forests}   Loss: {loss_str}",
+        f"Ensembles: {num_forests}   Loss: {loss_str}",
         f"  Train pixels  : {train_pixels}   Val pixels: {val_pixels}",
         f"{BOLD}{MAGENTA}{'═'*60}{RESET}",
     ]
@@ -213,7 +206,7 @@ def forest_done_line(forest_idx: int, num_forests: int,
     gpu = gpu_stats()
     hw_line = f"    {GRAY}{elapsed} elapsed{f' | {gpu}' if gpu else ''}{RESET}"
     return (
-        f"  {GREEN}✓{RESET} Forest {forest_idx+1}/{num_forests} done"
+        f"  {GREEN}✓{RESET} Ensemble {forest_idx+1}/{num_forests} done"
         f"  Best @ epoch {BOLD}{best_epoch}{RESET}"
         f"  mIoU {_c(f'{best_miou:.4f}', miou_col)}"
         f"  OA {_c(f'{best_oa:.4f}', oa_col)}"

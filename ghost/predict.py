@@ -20,7 +20,7 @@ def main():
 
     parser.add_argument('--data',        type=str,   required=True)
     parser.add_argument('--gt',          type=str,   required=True)
-    parser.add_argument('--model',       type=str,   required=True, help='Path to rssp_models.pkl')
+    parser.add_argument('--model',       type=str,   required=True, help='Path to spt_models.pkl')
     parser.add_argument('--ssm_load',    type=str,   default=None)
     parser.add_argument('--train_ratio', type=float, default=0.2)
     parser.add_argument('--val_ratio',   type=float, default=0.1)
@@ -88,7 +88,7 @@ def main():
                     ssm_encoder.load_state_dict(
                         {k: v.to(DEVICE) for k, v in checkpoint['ssm_state'].items()})
                 else:
-                    print("WARNING: No SSM weights found. Falling back to forest-only routing.")
+                    print("WARNING: No SSM weights found. Falling back to ensemble routing.")
                     current_routing = 'forest'
             else:
                 print(f"Loading SSM encoder from {args.ssm_load} ...")

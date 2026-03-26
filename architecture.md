@@ -10,14 +10,14 @@
                     ┌───────────────┴───────────────┐
                     |                               |
              Continuum Removal              Raw spectra saved
-             (physics-based norm)           for RSSP tree building
+             (physics-based norm)           for SPT tree building
                     |                               |
                     v                               v
             Spectral 3D Conv Stack          SAM distance matrix
             kernel (7, 3, 3)                between class means
             num_blocks layers                       |
                     |                               v
-                    v                        RSSP Binary Tree
+                    v                        Spectral Partition Tree
               SE Attention                  (recursive spectral
               (channel weighting)            class splitting)
                     |                               |
@@ -27,12 +27,12 @@
                     |                               |
                     └───────────┬───────────────────┘
                                 |
-                    Per-node forest ensemble
+                    Per-node model ensemble
                     (each tree node trains N independent models)
                                 |
                                 v
                     Soft cascade inference
-                    (probabilities averaged across forests,
+                    (probabilities averaged across ensemble members,
                      propagated down tree branches)
                                 |
                                 v
@@ -97,7 +97,7 @@ Handles non-power-of-two spatial dimensions via bilinear interpolation before sk
 
 **Source:** `ghost/models/encoder_2d.py`, `ghost/models/decoder_2d.py`
 
-### 5. RSSP — Recursive Spectral Splitting with Parallel Forests
+### 5. SPT — Spectral Partition Tree
 
 The core of GHOST's approach to multi-class segmentation.
 
@@ -118,15 +118,15 @@ The core of GHOST's approach to multi-class segmentation.
 
 **Training:**
 
-Each tree node trains an independent ensemble of `num_forests` HyperspectralNet models:
+Each tree node trains an independent ensemble of `num_ensembles` HyperspectralNet models:
 - Global class IDs are remapped to local IDs per node
 - Epoch budget scales with node complexity: `max(epochs//2, epochs x node_classes/total_classes)`
-- Each forest member uses a different random seed
-- Best model (by validation mIoU) is checkpointed per forest member
+- Each ensemble member uses a different random seed
+- Best model (by validation mIoU) is checkpointed per ensemble member
 
 **Inference:**
 
-Soft cascade — softmax probabilities are averaged across forest members, then propagated down the tree with routing weights. Final prediction is argmax of accumulated global-class probabilities.
+Soft cascade — softmax probabilities are averaged across ensemble members, then propagated down the tree with routing weights. Final prediction is argmax of accumulated global-class probabilities.
 
 **Source:** `ghost/rssp/sam_clustering.py`, `ghost/rssp/rssp_trainer.py`, `ghost/rssp/rssp_inference.py`
 
@@ -136,9 +136,9 @@ Selective Spectral State Routing. Replaces hard argmax at each tree node with pr
 
 - A frozen spectral encoder produces per-pixel fingerprints
 - A lightweight routing head at each node outputs `p_left in (0, 1)`
-- In hybrid mode: forest routing is base, SSSR corrects proportionally to confidence
+- In hybrid mode: ensemble routing is base, SSSR corrects proportionally to confidence
 
-**Status:** Experimental. Forest routing outperforms hybrid/soft in all tested configurations. The SSM encoder will be reworked in a future version.
+**Status:** Experimental. Ensemble routing outperforms hybrid/soft in all tested configurations. The SSM encoder will be reworked in a future version.
 
 **Source:** `ghost/rssp/sssr_router.py`, `ghost/models/spectral_ssm.py`
 
@@ -152,17 +152,5 @@ Selective Spectral State Routing. Replaces hard argmax at each tree node with pr
 | Optimiser | AdamW | `weight_decay=1e-4` |
 | Scheduler | ReduceLROnPlateau | `patience=10, factor=0.5` |
 | Early stopping | patience=50 | No improvement for N epochs → stop |
-| Checkpoint | best val mIoU | Per node, per forest member |
+| Checkpoint | best val mIoU | Per node, per ensemble member |
 | Splits | stratified | Every class appears in every split |
-
----
-
-## Known Limitations
-
-- Local spectral context only (7-band kernel) — long-range spectral dependencies not modelled
-- No spatial regularisation — per-pixel predictions, no CRF post-processing
-- Class imbalance handled structurally by RSSP but not at the sampling level
-- Full-image training — incompatible with patch-based methods that need sample diversity
-- Single image per training run — no multi-scene training
-
-See [TODO.md](TODO.md) for the full list.
