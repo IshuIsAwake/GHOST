@@ -9,7 +9,6 @@ build/
 
 # Cython build artifacts
 *.c
-!ghost/data/
 *.so
 *.pyd
 
@@ -32,6 +31,7 @@ runs/
 
 # Data (external datasets — bundled data lives in ghost/data/)
 data/
+!ghost/data/
 
 # Large files / downloads
 *.zip
