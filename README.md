@@ -157,17 +157,6 @@ ghost visualize \
 
 ---
 
-## Hardware Requirements
-
-| Setting | VRAM | Flags | Indian Pines Time |
-|---------|------|-------|-------------------|
-| Lightweight | 4 GB | `--base_filters 16 --num_filters 4 --d_model 32` | ~30m |
-| Standard | 6 GB | `--base_filters 32 --num_filters 8` | ~77m |
-| Full | 8 GB+ | `--base_filters 64 --num_filters 32` | ~6h |
-
-No multi-GPU support. Single consumer GPU is all you need.
-
----
 
 ## Data Format
 
