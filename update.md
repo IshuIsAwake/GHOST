@@ -23,6 +23,8 @@ ghost/__init__.py    →  __version__ = "X.Y.Z"
 pyproject.toml       →  version = "X.Y.Z"
 ```
 
+> **PyPI rejects re-uploads of the same version.** Always bump before releasing.
+
 Version convention:
 - **Patch** (0.1.3 → 0.1.4): bug fixes, small improvements
 - **Minor** (0.1.4 → 0.2.0): new features, new CLI commands
@@ -38,11 +40,11 @@ git push origin main
 
 ### 4. Create a GitHub Release
 
-This triggers the CI/CD pipeline that builds wheels for all platforms.
+This triggers the CI/CD pipeline that builds compiled wheels for all platforms.
 
 **Option A: GitHub UI**
 1. Go to https://github.com/IshuIsAwake/GHOST/releases/new
-2. Click "Choose a tag" → type `v0.X.Y` → "Create new tag on publish"
+2. Click "Choose a tag" → type `v0.X.Y` → **"Create new tag on publish"**
 3. Title: `v0.X.Y`
 4. Description: what changed
 5. Click **Publish release**
@@ -57,31 +59,74 @@ gh release create v0.X.Y --title "v0.X.Y" --notes "Description of changes"
 ### 5. CI builds and publishes automatically
 
 The GitHub Actions workflow (`.github/workflows/publish.yml`) will:
-1. Build compiled wheels for Python 3.9, 3.10, 3.11, 3.12 on Linux, macOS, Windows
-2. Build a source distribution (sdist) as fallback
-3. Run import tests on each wheel
-4. Upload everything to PyPI via trusted publishing
+1. Build Cython-compiled wheels for Python 3.9–3.12 on Linux, macOS (ARM64), and Windows
+2. Build a source distribution (sdist) as fallback for unsupported platforms
+3. Upload everything to PyPI via trusted publishing (no API token needed)
 
 Monitor progress at: https://github.com/IshuIsAwake/GHOST/actions
+
+**Expected time:** ~8 minutes for all platforms.
 
 ### 6. Verify
 
 ```bash
+# In a separate test environment (not your dev env)
+conda activate ghost_test
 pip install --upgrade ghost-hsi
-ghost --version
+ghost version
 ```
 
 ---
 
-## Manual upload (fallback if CI is not set up)
+## If CI fails
 
-If the GitHub Actions workflow isn't configured yet:
+### How to retry after fixing
+
+You **cannot** re-publish a GitHub Release with the same tag and expect CI to re-trigger cleanly. Do this:
 
 ```bash
-# Clean
+# 1. Delete the release on GitHub UI (Releases → v0.X.Y → Delete)
+
+# 2. Delete the remote and local tag
+git push origin --delete v0.X.Y
+git tag -d v0.X.Y
+
+# 3. Push your fix
+git add -A
+git commit -m "fix: description of what you fixed"
+git push origin main
+
+# 4. Recreate the tag and release
+git tag v0.X.Y
+git push origin v0.X.Y
+# Then create the release on GitHub UI or:
+gh release create v0.X.Y --title "v0.X.Y" --notes "Release notes"
+```
+
+### Common CI failures and fixes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| "Pure Python wheel was generated" | Cython missing from build environment | Ensure `cython>=3.0` is in `pyproject.toml` → `[build-system].requires` |
+| "Configuration not supported" on macOS | GitHub deprecated the runner (e.g. macos-13) | Remove it from the matrix in `publish.yml` |
+| Test step times out (600s+) | `CIBW_TEST_COMMAND` imports torch (~2GB install) | Keep test lightweight — import only `ghost` (no torch deps) |
+| PyPI rejects upload | Version already exists on PyPI | Bump version, can't overwrite existing releases |
+
+### Key thing to know about cibuildwheel
+
+cibuildwheel creates **isolated PEP 517 build environments**. These only install packages listed in `pyproject.toml` → `[build-system].requires`. Installing something via `CIBW_BEFORE_BUILD` puts it in the host env, **not** the isolated build env. So build dependencies like Cython **must** go in `pyproject.toml`.
+
+---
+
+## Manual upload (fallback)
+
+If CI is broken and you need to ship urgently:
+
+```bash
+# Clean previous builds
 rm -rf dist/ build/ *.egg-info
 
-# Build sdist (works on all Python versions, pure Python fallback)
+# Build sdist (pure Python fallback — no Cython)
 python -m build --sdist
 
 # Upload
@@ -90,72 +135,45 @@ python -m twine upload dist/*
 # Password: <your PyPI API token>
 ```
 
+> This uploads a source distribution only. Users get pure Python (no compiled .so). Use as a last resort.
+
 ---
 
 ## One-time setup: PyPI Trusted Publishing
 
-This lets GitHub Actions upload to PyPI without storing API tokens.
+This lets GitHub Actions upload to PyPI without storing API tokens. Already configured for this project.
 
-1. **PyPI side:** Go to https://pypi.org/manage/project/ghost-hsi/settings/publishing/
+1. **PyPI side:** https://pypi.org/manage/project/ghost-hsi/settings/publishing/
    - Owner: `IshuIsAwake`
    - Repository: `GHOST`
    - Workflow name: `publish.yml`
    - Environment name: `pypi`
 
-2. **GitHub side:** Go to https://github.com/IshuIsAwake/GHOST/settings/environments
-   - Create an environment called `pypi`
+2. **GitHub side:** https://github.com/IshuIsAwake/GHOST/settings/environments
+   - Environment called `pypi` exists
 
 ---
 
-## Updating your local dev environment
+## Updating environments
 
+### Local dev environment
 ```bash
-# If installed in editable mode (recommended for development)
 cd ~/Projects/AI/GHOST
 pip install -e .
-
 # Changes to .py files take effect immediately — no reinstall needed
 ```
 
-## Updating a separate test environment
-
+### Separate test environment
 ```bash
 conda activate ghost_test
 pip install --upgrade --force-reinstall ghost-hsi
-ghost --version
+ghost version
 ```
 
-## Updating on Google Colab
-
+### Google Colab
 ```python
 !pip install --upgrade ghost-hsi
-import ghost
-print(ghost.__version__)
-```
-
----
-
-## Project structure (key files)
-
-```
-GHOST/
-├── ghost/
-│   ├── __init__.py              # Version string (__version__)
-│   ├── cli.py                   # CLI entry point (ghost command)
-│   ├── train.py                 # Single-model training
-│   ├── train_rssp.py            # RSSP forest ensemble training
-│   ├── predict.py               # Inference from saved model
-│   ├── visualize.py             # Generate prediction maps
-│   ├── datasets/                # Data loading
-│   ├── models/                  # Neural network architectures
-│   ├── preprocessing/           # Continuum removal, etc.
-│   ├── rssp/                    # RSSP tree, trainer, inference, SSM
-│   └── utils/                   # Display, logging utilities
-├── pyproject.toml               # Package metadata + version
-├── setup.py                     # Cython build (optional, CI uses it)
-├── MANIFEST.in                  # sdist file inclusion rules
-└── .github/workflows/
-    └── publish.yml              # CI/CD: build wheels + publish to PyPI
+!ghost version
 ```
 
 ---
@@ -166,7 +184,6 @@ GHOST/
 - [ ] Version bumped in `ghost/__init__.py` AND `pyproject.toml`
 - [ ] Committed and pushed to `main`
 - [ ] GitHub Release created (triggers CI)
-- [ ] CI workflow passed (check Actions tab)
-- [ ] `pip install --upgrade ghost-hsi` works
-- [ ] `ghost --version` shows new version
-- [ ] Tested on Colab: `!pip install ghost-hsi && !ghost --version`
+- [ ] CI workflow passed (check Actions tab — all 3 jobs green)
+- [ ] `pip install --upgrade ghost-hsi` shows new version
+- [ ] `ghost version` prints correct version

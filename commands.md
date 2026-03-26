@@ -5,12 +5,8 @@
 ## Version & Info
 
 ```bash
-# Check installed version
 ghost --version
-ghost -v
 ghost version
-
-# Show bundled demo dataset paths
 ghost demo
 ```
 
@@ -19,31 +15,31 @@ ghost demo
 ## Indian Pines
 
 ```bash
-# Train (CE+Dice, forest routing)
-ghost train_rssp \
-  --data GHOST/data/indian_pines/Indian_pines_corrected.mat \
-  --gt   GHOST/data/indian_pines/Indian_pines_gt.mat \
-  --loss dice --routing forest \
+# Train (Dice loss, SPT + ensembles)
+ghost train_spt \
+  --data data/indian_pines/Indian_pines_corrected.mat \
+  --gt   data/indian_pines/Indian_pines_gt.mat \
+  --loss dice \
   --base_filters 32 --num_filters 8 --num_blocks 3 \
-  --forests 5 --leaf_forests 3 \
+  --ensembles 5 --leaf_ensembles 3 \
   --epochs 400 --patience 50 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir GHOST/runs/indian_pines_ce_dice
+  --out-dir runs/indian_pines_dice
 
 # Predict
 ghost predict \
   --data  data/indian_pines/Indian_pines_corrected.mat \
   --gt    data/indian_pines/Indian_pines_gt.mat \
-  --model runs/indian_pines_ce_dice/rssp_models.pkl \
-  --routing forest --out-dir runs/indian_pines_ce_dice
+  --model runs/indian_pines_dice/spt_models.pkl \
+  --routing forest --out-dir runs/indian_pines_dice
 
 # Visualize
 ghost visualize \
   --data  data/indian_pines/Indian_pines_corrected.mat \
   --gt    data/indian_pines/Indian_pines_gt.mat \
-  --model runs/indian_pines_ce_dice/rssp_models.pkl \
+  --model runs/indian_pines_dice/spt_models.pkl \
   --routing forest --dataset indian_pines \
-  --out-dir runs/indian_pines_ce_dice
+  --out-dir runs/indian_pines_dice
 ```
 
 ---
@@ -52,30 +48,30 @@ ghost visualize \
 
 ```bash
 # Train
-ghost train_rssp \
-  --data GHOST/data/pavia/PaviaU.mat \
-  --gt   GHOST/data/pavia/PaviaU_gt.mat \
-  --loss dice --routing forest \
+ghost train_spt \
+  --data data/pavia/PaviaU.mat \
+  --gt   data/pavia/PaviaU_gt.mat \
+  --loss dice \
   --base_filters 16 --num_filters 4 --num_blocks 3 \
-  --forests 5 --leaf_forests 3 \
+  --ensembles 5 --leaf_ensembles 3 \
   --epochs 400 --patience 50 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir GHOST/runs/pavia_ce_dice
+  --out-dir runs/pavia_dice
 
 # Predict
 ghost predict \
   --data  data/pavia/PaviaU.mat \
   --gt    data/pavia/PaviaU_gt.mat \
-  --model runs/pavia_ce_dice/rssp_models.pkl \
-  --routing forest --out-dir runs/pavia_ce_dice
+  --model runs/pavia_dice/spt_models.pkl \
+  --routing forest --out-dir runs/pavia_dice
 
 # Visualize
 ghost visualize \
   --data  data/pavia/PaviaU.mat \
   --gt    data/pavia/PaviaU_gt.mat \
-  --model runs/pavia_ce_dice/rssp_models.pkl \
+  --model runs/pavia_dice/spt_models.pkl \
   --routing forest --dataset pavia \
-  --out-dir runs/pavia_ce_dice
+  --out-dir runs/pavia_dice
 ```
 
 ---
@@ -84,39 +80,37 @@ ghost visualize \
 
 ```bash
 # Train
-ghost train_rssp \
-  --data GHOST/data/salinas/Salinas_corrected.mat \
-  --gt   GHOST/data/salinas/Salinas_gt.mat \
-  --loss dice --routing forest \
+ghost train_spt \
+  --data data/salinas/Salinas_corrected.mat \
+  --gt   data/salinas/Salinas_gt.mat \
+  --loss dice \
   --base_filters 16 --num_filters 4 --num_blocks 3 \
-  --forests 5 --leaf_forests 3 \
+  --ensembles 5 --leaf_ensembles 3 \
   --epochs 400 --patience 50 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir GHOST/runs/salinas_ce_dice
+  --out-dir runs/salinas_dice
 
 # Predict
 ghost predict \
   --data  data/salinas/Salinas_corrected.mat \
   --gt    data/salinas/Salinas_gt.mat \
-  --model runs/salinas_ce_dice/rssp_models.pkl \
-  --routing forest --out-dir runs/salinas_ce_dice
+  --model runs/salinas_dice/spt_models.pkl \
+  --routing forest --out-dir runs/salinas_dice
 
 # Visualize
 ghost visualize \
   --data  data/salinas/Salinas_corrected.mat \
   --gt    data/salinas/Salinas_gt.mat \
-  --model runs/salinas_ce_dice/rssp_models.pkl \
+  --model runs/salinas_dice/spt_models.pkl \
   --routing forest --dataset salinas \
-  --out-dir runs/salinas_ce_dice
+  --out-dir runs/salinas_dice
 ```
 
 ---
 
-## LUSC (Lung Squamous Cell Carcinoma — Medical Pathology HSI)
+## LUSC (Lung Squamous Cell Carcinoma)
 
-> **Preprocessing required:** The raw data is ENVI format. Convert to .mat first using the
-> one-off script below (not part of GHOST). The 512x512 crop at (y=192, x=2304) contains
-> all 3 classes: non-tumor cells, tumor cells, and non-cell tissue.
+> **Preprocessing required:** The raw data is ENVI format. Convert to .mat first.
 
 ```bash
 # One-off conversion: ENVI + PNG labels → .mat (run once)
@@ -143,12 +137,12 @@ print('Saved 512x512 crops')
 "
 
 # Train
-ghost train_rssp \
+ghost train_spt \
   --data data/lusc/lusc_512_data.mat \
   --gt   data/lusc/lusc_512_gt.mat \
-  --loss dice --routing forest \
+  --loss dice \
   --base_filters 32 --num_filters 8 --num_blocks 3 \
-  --forests 5 --leaf_forests 3 \
+  --ensembles 5 --leaf_ensembles 3 \
   --epochs 400 --patience 50 --min_epochs 40 \
   --val_interval 20 \
   --out-dir runs/lusc_dice
@@ -157,14 +151,14 @@ ghost train_rssp \
 ghost predict \
   --data  data/lusc/lusc_512_data.mat \
   --gt    data/lusc/lusc_512_gt.mat \
-  --model runs/lusc_dice/rssp_models.pkl \
+  --model runs/lusc_dice/spt_models.pkl \
   --routing forest --out-dir runs/lusc_dice
 
 # Visualize
 ghost visualize \
   --data  data/lusc/lusc_512_data.mat \
   --gt    data/lusc/lusc_512_gt.mat \
-  --model runs/lusc_dice/rssp_models.pkl \
+  --model runs/lusc_dice/spt_models.pkl \
   --routing forest \
   --out-dir runs/lusc_dice
 ```
@@ -173,11 +167,9 @@ ghost visualize \
 
 ## Output Files
 
-After training, the output directory contains:
-
 | File | Description |
 |------|-------------|
-| `rssp_models.pkl` | Trained model checkpoint (all forests + router weights) |
+| `spt_models.pkl` | Trained model checkpoint (all ensembles + router weights) |
 | `ssm_pretrained.pt` | Pre-trained SSM encoder weights |
 | `training_history.csv` | Per-epoch metrics: OA, mIoU, Dice, Precision, Recall, AA, Kappa |
 | `test_results.csv` | Final test metrics summary |
