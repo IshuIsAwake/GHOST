@@ -79,11 +79,9 @@ Classes 7 and 9 have <30 training samples. Low IoU on these is expected and cons
 
 ### Salinas Valley
 
-> *Results pending re-run with latest pipeline. Space reserved.*
-
 | Config | OA | mIoU | Dice | Kappa | Time |
 |--------|-----|------|------|-------|------|
-| — | — | — | — | — | — |
+| 16 base / 4 num filters | 92.4% | 0.7668 | 0.8276 | 0.9154 | 4h 11m |
 
 ### Pavia University
 
@@ -91,7 +89,7 @@ Classes 7 and 9 have <30 training samples. Low IoU on these is expected and cons
 
 | Config | OA | mIoU | Dice | Kappa | Time |
 |--------|-----|------|------|-------|------|
-| — | — | — | — | — | — |
+| 16 base / 4 num filters | — | — | — | — | — |
 
 ### LUSC (Lung Squamous Cell Carcinoma)
 
