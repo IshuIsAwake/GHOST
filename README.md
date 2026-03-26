@@ -186,7 +186,7 @@ SE Attention ---------- per-channel importance weighting
 2D U-Net -------------- multi-scale spatial context
     |
     v
-RSSP Tree ------------- recursive binary class splitting
+RSSP Tree ------------- recursive spectral spatial splitting
     |                   each node: independent forest ensemble
     v
 Prediction Map (H, W)
@@ -221,7 +221,7 @@ If you use GHOST in your research, please cite:
 ```
 @software{ghost2026,
   title  = {GHOST: Generalizable Hyperspectral Observation \& Segmentation Toolkit},
-  author = {Ishu},
+  author = {IshuIsAwake},
   year   = {2026},
   url    = {https://pypi.org/project/ghost-hsi/}
 }
