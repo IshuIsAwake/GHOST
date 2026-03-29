@@ -2,9 +2,9 @@
 
 ### Generalizable Hyperspectral Observation & Segmentation Toolkit
 
-> **Beta** — GHOST is under active development. APIs and CLI flags may change between minor versions.
+> **Work in progress** — this is a personal project I'm building to learn about hyperspectral image segmentation. APIs and CLI flags will probably change.
 
-Inspired by [nnU-Net](https://github.com/MIC-DKFZ/nnUNet)'s philosophy of out-of-the-box segmentation — applied to hyperspectral imagery.
+GHOST is my attempt at making a general-purpose hyperspectral segmentation tool — something where you point it at a `.mat` file and get a segmentation map without writing dataset-specific code. The idea is loosely inspired by [nnU-Net](https://github.com/MIC-DKFZ/nnUNet), though GHOST is much simpler and narrower in scope.
 
 ```bash
 pip install ghost-hsi
@@ -13,42 +13,38 @@ ghost demo
 
 ---
 
-## What is GHOST?
+## What it does
 
-GHOST is a hyperspectral image segmentation framework. It takes any `.mat` hyperspectral dataset and produces a segmentation map — no code, no pipeline configuration, no PCA.
+You give it a hyperspectral `.mat` file and a ground truth file. It figures out the band count, class count, and spatial dimensions at runtime and trains a segmentation model.
 
-It is data-agnostic: band count, class count, and spatial dimensions are read from the file at runtime. The same binary has been tested on:
+I've tested it on a few datasets so far:
 
 - **Indian Pines** — 200 bands, 16 classes (remote sensing)
 - **Salinas Valley** — 204 bands, 16 classes (remote sensing)
 - **Pavia University** — 103 bands, 9 classes (remote sensing)
-- **LUSC** — 61 bands, 3 classes (lung cancer histopathology)
-- **Mars CRISM** — planetary remote sensing
+- **LUSC** — 61 bands, 3 classes (lung cancer histopathology, single crop only)
 
-Zero code changes between any of these.
-
-See [results.md](results.md) for full numbers with caveats.
+Same code for all of these, no changes between runs. That's the part I'm most interested in — whether this generalizes.
 
 ---
 
-## Results Overview
+## Numbers so far
 
 | Dataset | Config | OA | mIoU | Kappa | Hardware | Time |
 |---------|--------|-----|------|-------|----------|------|
-| LUSC | 32 / 8 | **99.42%** | 0.9263 | 0.9876 | RTX 3050 (laptop) | 1h 8m |
-| Salinas Valley | 32 / 8 | **98.69%** | 0.9577 | 0.9855 | Kaggle T4 | 10h 51m |
-| Indian Pines | 64 / 16 | **98.16%** | 0.9071 | 0.9790 | RTX 3050 (laptop) | 2h 20m |
-| Pavia University | 32 / 8 | **97.47%** | 0.9531 | 0.9667 | Kaggle T4 | 7h 29m |
-| Indian Pines | 32 / 8 | **97.20%** | 0.8030 | 0.9681 | RTX 3050 (laptop) | 1h 17m |
+| LUSC | 32 / 8 | 99.42% | 0.9263 | 0.9876 | RTX 3050 (laptop) | 1h 8m |
+| Salinas Valley | 32 / 8 | 98.69% | 0.9577 | 0.9855 | Kaggle T4 | 10h 51m |
+| Indian Pines | 64 / 16 | 98.16% | 0.9071 | 0.9790 | RTX 3050 (laptop) | 2h 20m |
+| Pavia University | 32 / 8 | 97.47% | 0.9531 | 0.9667 | Kaggle T4 | 7h 29m |
+| Indian Pines | 32 / 8 | 97.20% | 0.8030 | 0.9681 | RTX 3050 (laptop) | 1h 17m |
 
-All runs: ce+dice loss, `--routing forest`. Config = base_filters / num_filters.
-LUSC results are from a single 512×512 crop and are **not benchmark-comparable** — see [results.md](results.md) for caveats.
+**Take these with a grain of salt.** The evaluation setup is basic (pixel-level train/test split on a single scene), which is standard for these benchmarks but doesn't tell you much about real-world generalization. The LUSC result especially is from a single 512x512 crop and is not comparable to published benchmarks — see [results.md](results.md) for the full caveats.
 
-Full results including per-class IoU, ablation studies, LUSC, and run variance are in [results.md](results.md).
+Config = base_filters / num_filters. All runs use ce+dice loss and ensemble routing.
 
 ---
 
-## Architecture
+## How it works (roughly)
 
 ```
 .mat file (H, W, Bands)
@@ -72,11 +68,13 @@ SPT ------------------- Spectral Partition Tree
 Prediction Map (H, W)
 ```
 
-See [architecture.md](architecture.md) for technical details.
+The SPT (Spectral Partition Tree) is the most interesting part to me — it recursively splits classes into groups based on spectral similarity (using SAM distance), and trains separate model ensembles for each group. This seems to help a lot with class imbalance, though I haven't done rigorous ablations yet beyond Indian Pines.
+
+See [architecture.md](architecture.md) if you want the details.
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
 # Install
@@ -111,7 +109,7 @@ A flat baseline (no SPT) is available via `ghost train`.
 
 ---
 
-## Data Format
+## Data format
 
 GHOST accepts `.mat` files (MATLAB/HDF5 format):
 - **Data file:** 3D array `(H, W, Bands)` — the hyperspectral cube
@@ -121,17 +119,19 @@ Keys inside the `.mat` file are auto-detected by array dimensionality.
 
 Standard datasets (Indian Pines, Pavia University, Salinas Valley) are available from [the GIC group at UPV/EHU](http://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes).
 
+Only `.mat` is supported right now. ENVI, GeoTIFF, etc. need manual conversion — see [limitations.md](limitations.md).
+
 ---
 
-## Documentation
+## Docs
 
-| Document | Description |
+| Document | What's in it |
 |----------|-------------|
-| [Architecture](architecture.md) | Pipeline components, SPT, training details |
-| [API Reference](API_Reference.md) | All CLI commands and flags |
-| [Results](results.md) | Full results, per-class IoU, caveats |
-| [Limitations](limitations.md) | What doesn't work, honest assessment |
-| [TODO](TODO.md) | Planned features |
+| [Architecture](architecture.md) | How the pipeline works |
+| [API Reference](API_Reference.md) | CLI commands and flags |
+| [Results](results.md) | Full numbers, per-class breakdowns, caveats |
+| [Limitations](limitations.md) | What doesn't work |
+| [TODO](TODO.md) | Things I want to add eventually |
 
 ---
 

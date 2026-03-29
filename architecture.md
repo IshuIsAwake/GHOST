@@ -1,8 +1,10 @@
-# GHOST Architecture
+# GHOST — Architecture
+
+This is how the pipeline works. Nothing here is particularly novel — it's mostly standard components wired together in a way that seemed reasonable for hyperspectral data.
 
 ---
 
-## Pipeline Overview
+## Pipeline overview
 
 ```
                          Input: .mat file (H, W, Bands)
@@ -43,43 +45,39 @@
 
 ## Components
 
-### 1. Continuum Removal
+### 1. Continuum removal
 
-Replaces PCA as the dimensionality-agnostic preprocessing step.
+Instead of PCA (which requires choosing how many components to keep), I use continuum removal as the preprocessing step.
 
 ```
 CR(lambda) = spectrum(lambda) / continuum(lambda)
 ```
 
-The continuum is the convex hull envelope of the reflectance spectrum. Dividing by it removes brightness variation across sensors and illumination conditions, leaving only **absorption feature shape**.
-
-- No components to choose
-- No information discarded
-- Works on any band count without configuration
+The continuum is the convex hull envelope of the reflectance spectrum. Dividing by it removes brightness variation and leaves absorption feature shape. The nice thing is it works on any band count without configuration and doesn't throw away information.
 
 **Source:** `ghost/preprocessing/continuum_removal.py`
 
-### 2. Spectral 3D Convolution Stack
+### 2. Spectral 3D convolution stack
 
 3D convolutions with kernel `(7, 3, 3)` — 7 bands spectral depth, 3x3 spatial.
 
-- Models spectral band adjacency explicitly (nearby bands are correlated)
+- Models spectral band adjacency (nearby bands tend to be correlated)
 - `num_blocks` sequential layers (default: 3)
 - Output channels: `num_filters x C`
 - Handles arbitrary band counts at runtime
 
 **Source:** `ghost/models/spectral_3d_block.py`
 
-### 3. Squeeze-and-Excitation (SE) Block
+### 3. Squeeze-and-Excitation (SE) block
 
-Channel attention mechanism:
+Standard channel attention:
 
 1. Global average pool each channel to a scalar
 2. Pass through a 2-layer MLP (reduce → expand)
-3. Sigmoid activation → per-channel weight
-4. Multiply each channel by its learned weight
+3. Sigmoid → per-channel weight
+4. Multiply each channel by its weight
 
-Selects which spectral features matter, suppresses noise channels.
+The idea is to let the network learn which spectral features matter for a given input.
 
 **Source:** `ghost/models/se_block.py`
 
@@ -99,9 +97,9 @@ Handles non-power-of-two spatial dimensions via bilinear interpolation before sk
 
 ### 5. SPT — Spectral Partition Tree
 
-The core of GHOST's approach to multi-class segmentation.
+This is the part I find most interesting. Instead of training one model on all classes at once, the SPT splits classes into groups based on spectral similarity and trains separate ensembles for each group.
 
-**Tree Construction:**
+**Tree construction:**
 
 1. Compute mean spectrum per class (after continuum removal)
 2. Build pairwise SAM (Spectral Angle Mapper) distance matrix
@@ -118,7 +116,7 @@ The core of GHOST's approach to multi-class segmentation.
 
 **Training:**
 
-Each tree node trains an independent ensemble of `num_ensembles` HyperspectralNet models:
+Each tree node trains an independent ensemble of `num_ensembles` models:
 - Global class IDs are remapped to local IDs per node
 - Epoch budget scales with node complexity: `max(epochs//2, epochs x node_classes/total_classes)`
 - Each ensemble member uses a different random seed
@@ -130,21 +128,15 @@ Soft cascade — softmax probabilities are averaged across ensemble members, the
 
 **Source:** `ghost/rssp/sam_clustering.py`, `ghost/rssp/rssp_trainer.py`, `ghost/rssp/rssp_inference.py`
 
-### 6. SSSR Router (Experimental)
+### 6. SSSR Router (experimental, not recommended)
 
-Selective Spectral State Routing. Replaces hard argmax at each tree node with probabilistic soft routing.
-
-- A frozen spectral encoder produces per-pixel fingerprints
-- A lightweight routing head at each node outputs `p_left in (0, 1)`
-- In hybrid mode: ensemble routing is base, SSSR corrects proportionally to confidence
-
-**Status:** Experimental. Ensemble routing outperforms hybrid/soft in all tested configurations. The SSM encoder will be reworked in a future version.
+An attempt at replacing hard argmax at each tree node with probabilistic soft routing using a spectral state-space model. It doesn't work well — ensemble routing beats it in every configuration I've tested. I'll either rework or remove it.
 
 **Source:** `ghost/rssp/sssr_router.py`, `ghost/models/spectral_ssm.py`
 
 ---
 
-## Training Configuration
+## Training configuration
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

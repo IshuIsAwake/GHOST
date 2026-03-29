@@ -20,26 +20,26 @@ ghost train_spt \
   --data data/indian_pines/Indian_pines_corrected.mat \
   --gt   data/indian_pines/Indian_pines_gt.mat \
   --loss dice \
-  --base_filters 32 --num_filters 8 --num_blocks 3 \
+  --base_filters 64 --num_filters 16 --num_blocks 3 \
   --ensembles 5 --leaf_ensembles 3 \
-  --epochs 400 --patience 75 --min_epochs 40 \
+  --epochs 400 --patience 100 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir runs/local_runs/indian_ce_dice
+  --out-dir runs/local_runs/indian_ce_dice_high_filters
 
 # Predict
 ghost predict \
   --data  data/indian_pines/Indian_pines_corrected.mat \
   --gt    data/indian_pines/Indian_pines_gt.mat \
   --model runs/indian_pines_dice/spt_models.pkl \
-  --routing forest --out-dir runs/localc_runs/indian_ce_dice
+  --routing forest --out-dir runs/local_runs/indian_ce_dice_high_filters
 
 # Visualize
 ghost visualize \
   --data  data/indian_pines/Indian_pines_corrected.mat \
   --gt    data/indian_pines/Indian_pines_gt.mat \
   --model runs/indian_pines_dice/spt_models.pkl \
-  --routing forest --dataset indian_pines \
-  --out-dir runs/localc_runs/indian_ce_dice
+  --routing forest 
+  --out-dir runs/local_runs/indian_ce_dice_high_filters
 ```
 
 ---
@@ -141,9 +141,9 @@ ghost train_spt \
   --loss dice \
   --base_filters 32 --num_filters 8 --num_blocks 3 \
   --ensembles 5 --leaf_ensembles 3 \
-  --epochs 400 --patience 50 --min_epochs 40 \
+  --epochs 400 --patience 75 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir runs/lusc_dice
+  --out-dir runs/local_runs/LUSC
 
 # Predict
 ghost predict \

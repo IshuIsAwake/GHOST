@@ -1,52 +1,58 @@
 # GHOST — Limitations
 
-An honest list of what GHOST does not do well or does not support.
+Things that don't work well or aren't supported. I'm trying to be straightforward here.
 
 ---
 
-## Spectral Context
+## Evaluation methodology
+
+This is probably the biggest caveat. All results use pixel-level train/test splits on a single scene. Nearby pixels are spatially correlated, and the train/test sets are interleaved — so the numbers are optimistic compared to what you'd get with spatially disjoint splits or cross-scene evaluation. This is standard practice for these benchmarks (most published papers do the same), but it's still a real limitation.
+
+I haven't done scene-level cross-validation or tested on held-out scenes from the same sensor.
+
+## Spectral context
 
 - Spectral context is local only (7-band convolutional kernel). Long-range spectral dependencies are not modelled.
-- The SSM encoder (`--routing hybrid` / `--routing soft`) was designed to address this but currently underperforms ensemble routing. It will be reworked or removed.
+- The SSM encoder (`--routing hybrid` / `--routing soft`) was supposed to address this but it underperforms ensemble routing in every test. Needs a rethink or removal.
 
-## Spatial Predictions
+## Spatial predictions
 
-- Predictions are per-pixel. No CRF, morphological cleanup, or spatial regularisation is applied.
+- Predictions are per-pixel. No CRF, morphological cleanup, or spatial regularisation.
 - Homogeneous regions can show speckle noise in the prediction map.
 
-## Class Imbalance
+## Class imbalance
 
-- The SPT tree structure helps (splits rare classes into their own nodes).
-- Dice loss mitigates imbalance at the loss level.
-- Classes with <30 training pixels still underperform significantly (e.g., Indian Pines Class 7, 9).
-- No oversampling, SMOTE, or class-weighted sampling is implemented.
+- The SPT tree structure helps somewhat (splits rare classes into their own nodes).
+- Dice loss helps at the loss level.
+- Classes with <30 training pixels still do badly (e.g., Indian Pines Class 7, 9).
+- No oversampling, SMOTE, or class-weighted sampling.
 
-## Single Image Training
+## Single image training
 
 - GHOST trains on one hyperspectral scene at a time.
-- No support for multi-image training, scene-level cross-validation, or dataset-level data loaders.
-- This means results on medical datasets (LUSC) are not comparable to published benchmarks that use patient-level cross-validation.
+- No multi-image training, scene-level cross-validation, or dataset-level data loaders.
+- This is the main reason the LUSC results are not meaningful — proper medical HSI evaluation needs patient-level cross-validation.
 
-## No Transfer Learning
+## No transfer learning
 
-- Each training run starts from scratch. No pretrained weights, no fine-tuning, no domain adaptation between sensors.
+- Every training run starts from scratch. No pretrained weights, no fine-tuning.
 
-## File Format
+## File format
 
 - Only `.mat` (MATLAB/HDF5) files are supported.
-- ENVI (`.raw` + `.hdr`), GeoTIFF, and HDF5 (`.h5`) require manual conversion before use.
-- Native support for ENVI, TIFF, and other common hyperspectral formats is planned for future versions.
+- ENVI (`.raw` + `.hdr`), GeoTIFF, and HDF5 (`.h5`) need manual conversion.
+- I want to add native support for these eventually.
 
-## LUSC (Lung Squamous Cell Carcinoma)
+## LUSC specifics
 
-LUSC results demonstrate data-agnosticity (GHOST works on non-remote-sensing HSI), but carry significant caveats:
+The LUSC results show that the pipeline handles non-remote-sensing HSI, but that's about all they show:
 
-- **Single image only** — trained on 1 of 62 images (a 512×512 crop), not the full dataset
-- **Spatial leakage** — train/test split is pixel-level within the same tissue region, not patient-level cross-validation as in published benchmarks
-- **Class distribution** — the tumor class forms a large contiguous blob in this crop, making it spatially easy to segment
-- **No patient generalisation tested** — results do not indicate clinical applicability
+- **Single image only** — 1 of 62 images (a 512×512 crop)
+- **Spatial leakage** — pixel-level split within the same tissue region
+- **Easy geometry** — tumor is a big contiguous blob in this crop
+- **No patient generalization tested**
 
-**Preprocessing required:** The raw HMI-LUSC data is in ENVI format (`.raw` + `.hdr`) with PNG label masks. GHOST only accepts `.mat` files, so a one-off conversion is needed:
+**Preprocessing required:** Raw HMI-LUSC data is ENVI format. Conversion to `.mat`:
 
 ```bash
 python3 -c "
@@ -72,13 +78,12 @@ print('Saved 512x512 crops')
 "
 ```
 
-## SSM Routing
+## SSM routing
 
-- `--routing hybrid` and `--routing soft` are experimental. `--routing forest` (ensemble) is the only recommended mode.
+- `--routing hybrid` and `--routing soft` are experimental and worse than `--routing forest` in all tests.
 - The SSM encoder assumes `num_bands >= 50`. Fails silently on low-band datasets.
 
-## Model Weight Portability (Kaggle / Cloud)
+## Model weight portability (Kaggle / cloud)
 
-- **Warning:** Downloading model weights (`spt_models.pkl`) from Kaggle via zip download has been observed to silently corrupt the pickle file. The model loads without errors, but produces degraded predictions (e.g., 0.78 mIoU instead of the correct 0.96 mIoU).
-- This was confirmed by rerunning `ghost predict` on the same Kaggle environment where `train_spt` ran — both produced identical, correct results. The corruption occurs during the Kaggle download/zip/unzip process, not in the code.
-- **Workaround:** Always run `ghost predict` in the same environment where the model was trained to verify results. If you must transfer weights, compare the file size and checksum (`md5sum`) of the original and downloaded pkl to ensure integrity.
+- Downloading model weights (`spt_models.pkl`) from Kaggle via zip download can silently corrupt the pickle file. The model loads fine but predictions are degraded.
+- Workaround: always run `ghost predict` in the same environment where you trained. If transferring weights, check the file size and md5sum.
