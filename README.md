@@ -2,7 +2,9 @@
 
 ### Generalizable Hyperspectral Observation & Segmentation Toolkit
 
-Inspired by nnU-Net's philosophy of out-of-the-box segmentation — applied to hyperspectral imagery.
+> **Beta** — GHOST is under active development. APIs and CLI flags may change between minor versions.
+
+Inspired by [nnU-Net](https://github.com/MIC-DKFZ/nnUNet)'s philosophy of out-of-the-box segmentation — applied to hyperspectral imagery.
 
 ```bash
 pip install ghost-hsi
@@ -23,7 +25,7 @@ It is data-agnostic: band count, class count, and spatial dimensions are read fr
 - **LUSC** — 61 bands, 3 classes (lung cancer histopathology)
 - **Mars CRISM** — planetary remote sensing
 
-Zero code changes between any of these. All results reported here were obtained on a laptop with an RTX 3050 (6 GB VRAM).
+Zero code changes between any of these.
 
 See [results.md](results.md) for full numbers with caveats.
 
@@ -31,13 +33,18 @@ See [results.md](results.md) for full numbers with caveats.
 
 ## Results Overview
 
-### Indian Pines
+| Dataset | Config | OA | mIoU | Kappa | Hardware | Time |
+|---------|--------|-----|------|-------|----------|------|
+| LUSC | 32 / 8 | **99.42%** | 0.9263 | 0.9876 | RTX 3050 (laptop) | 1h 8m |
+| Salinas Valley | 32 / 8 | **98.69%** | 0.9577 | 0.9855 | Kaggle T4 | 10h 51m |
+| Indian Pines | 64 / 16 | **98.16%** | 0.9071 | 0.9790 | RTX 3050 (laptop) | 2h 20m |
+| Pavia University | 32 / 8 | **97.47%** | 0.9531 | 0.9667 | Kaggle T4 | 7h 29m |
+| Indian Pines | 32 / 8 | **97.20%** | 0.8030 | 0.9681 | RTX 3050 (laptop) | 1h 17m |
 
-| Config | OA | mIoU | Kappa | Time |
-|--------|-----|------|-------|------|
-| 32 base / 8 num filters | **97.55%** | 0.8027 | 0.9721 | 77m |
+All runs: ce+dice loss, `--routing forest`. Config = base_filters / num_filters.
+LUSC results are from a single 512×512 crop and are **not benchmark-comparable** — see [results.md](results.md) for caveats.
 
-Full results including Salinas, Pavia, LUSC, and ablation studies are in [results.md](results.md).
+Full results including per-class IoU, ablation studies, LUSC, and run variance are in [results.md](results.md).
 
 ---
 

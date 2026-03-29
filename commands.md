@@ -22,16 +22,16 @@ ghost train_spt \
   --loss dice \
   --base_filters 32 --num_filters 8 --num_blocks 3 \
   --ensembles 5 --leaf_ensembles 3 \
-  --epochs 400 --patience 50 --min_epochs 40 \
+  --epochs 400 --patience 75 --min_epochs 40 \
   --val_interval 20 \
-  --out-dir runs/indian_pines_dice
+  --out-dir runs/local_runs/indian_ce_dice
 
 # Predict
 ghost predict \
   --data  data/indian_pines/Indian_pines_corrected.mat \
   --gt    data/indian_pines/Indian_pines_gt.mat \
   --model runs/indian_pines_dice/spt_models.pkl \
-  --routing forest --out-dir runs/indian_pines_dice
+  --routing forest --out-dir runs/localc_runs/indian_ce_dice
 
 # Visualize
 ghost visualize \
@@ -39,7 +39,7 @@ ghost visualize \
   --gt    data/indian_pines/Indian_pines_gt.mat \
   --model runs/indian_pines_dice/spt_models.pkl \
   --routing forest --dataset indian_pines \
-  --out-dir runs/indian_pines_dice
+  --out-dir runs/localc_runs/indian_ce_dice
 ```
 
 ---
@@ -54,7 +54,7 @@ ghost train_spt \
   --loss dice \
   --base_filters 16 --num_filters 4 --num_blocks 3 \
   --ensembles 5 --leaf_ensembles 3 \
-  --epochs 400 --patience 50 --min_epochs 40 \
+  --epochs 400 --patience 75 --min_epochs 40 \
   --val_interval 20 \
   --out-dir runs/pavia_dice
 
@@ -62,16 +62,15 @@ ghost train_spt \
 ghost predict \
   --data  data/pavia/PaviaU.mat \
   --gt    data/pavia/PaviaU_gt.mat \
-  --model runs/pavia_dice/spt_models.pkl \
-  --routing forest --out-dir runs/pavia_dice
+  --model runs/kaggle/pavia/runs/pavia_dice/spt_models.pkl  
+
 
 # Visualize
 ghost visualize \
   --data  data/pavia/PaviaU.mat \
   --gt    data/pavia/PaviaU_gt.mat \
-  --model runs/pavia_dice/spt_models.pkl \
-  --routing forest --dataset pavia \
-  --out-dir runs/pavia_dice
+  --model runs/kaggle/salinas/runs/salinas_dice/spt_models.pkl \ 
+  --out-dir runs/pavia_dice_kaggle
 ```
 
 ---
@@ -94,16 +93,15 @@ ghost train_spt \
 ghost predict \
   --data  data/salinas/Salinas_corrected.mat \
   --gt    data/salinas/Salinas_gt.mat \
-  --model runs/salinas_dice/spt_models.pkl \
-  --routing forest --out-dir runs/salinas_dice
+  --model runs/salinas_ce_dice/rssp_models.pkl \
+  --routing forest --out-dir runs/salinas_ce_dice
 
 # Visualize
 ghost visualize \
   --data  data/salinas/Salinas_corrected.mat \
   --gt    data/salinas/Salinas_gt.mat \
-  --model runs/salinas_dice/spt_models.pkl \
-  --routing forest --dataset salinas \
-  --out-dir runs/salinas_dice
+  --model runs/salinas_ce_dice/rssp_models.pkl \
+  --out-dir runs/salinas_ce_dice
 ```
 
 ---
