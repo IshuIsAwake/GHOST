@@ -20,7 +20,7 @@ def main():
     )
     parser.add_argument(
         'command',
-        help='Subcommand: train | train_spt | predict | visualize | demo | version | flower'
+        help='Subcommand: train | train_spt | predict | visualize | convert_to_mat | demo | version | flower'
     )
 
     args, _ = parser.parse_known_args(sys.argv[1:2])
@@ -44,6 +44,11 @@ def main():
         from ghost.visualize import main as run_visualize
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         run_visualize()
+
+    elif args.command == 'convert_to_mat':
+        from ghost.convert import main as run_convert
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        run_convert()
 
     elif args.command == 'flower':
         print(f"{CYAN}{GHOST_FLOWER}{RESET}")
@@ -70,7 +75,7 @@ def main():
 
     else:
         print(f"{BOLD}Unrecognized command: '{args.command}'{RESET}")
-        print(f"{GRAY}Available commands: train | train_spt | predict | visualize | demo | version | flower")
+        print(f"{GRAY}Available commands: train | train_spt | predict | visualize | convert_to_mat | demo | version | flower")
         print(f"Use 'ghost --version' or 'ghost version' to check installed version{RESET}")
         parser.print_help()
         sys.exit(1)

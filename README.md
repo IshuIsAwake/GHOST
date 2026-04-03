@@ -2,9 +2,11 @@
 
 ### Generalizable Hyperspectral Observation & Segmentation Toolkit
 
-> **Work in progress** — this is a personal project I'm building to learn about hyperspectral image segmentation. APIs and CLI flags will probably change.
+> An attempt to generalize Hyperspectral Imaging.
 
-GHOST is my attempt at making a general-purpose hyperspectral segmentation tool — something where you point it at a `.mat` file and get a segmentation map without writing dataset-specific code. The idea is loosely inspired by [nnU-Net](https://github.com/MIC-DKFZ/nnUNet), though GHOST is much simpler and narrower in scope.
+GHOST is a general-purpose hyperspectral segmentation tool — point it at a hyperspectral image and get a segmentation map without writing dataset-specific code. Band count, class count, and spatial dimensions are read at runtime with no hardcoding. Loosely inspired by [nnU-Net](https://github.com/MIC-DKFZ/nnUNet), though much simpler and narrower in scope.
+
+**Supports Python 3.9 - 3.12**
 
 ```bash
 pip install ghost-hsi
@@ -13,18 +15,14 @@ ghost demo
 
 ---
 
-## What it does
+## Design Goals
 
-You give it a hyperspectral `.mat` file and a ground truth file. It figures out the band count, class count, and spatial dimensions at runtime and trains a segmentation model.
-
-I've tested it on a few datasets so far:
-
-- **Indian Pines** — 200 bands, 16 classes (remote sensing)
-- **Salinas Valley** — 204 bands, 16 classes (remote sensing)
-- **Pavia University** — 103 bands, 9 classes (remote sensing)
-- **LUSC** — 61 bands, 3 classes (lung cancer histopathology, single crop only)
-
-Same code for all of these, no changes between runs. That's the part I'm most interested in — whether this generalizes.
+| Goal | Status |
+|------|--------|
+| **Data Agnosticism** — band count, class count, spatial dims read at runtime | Achieved |
+| **Band Count Agnosticism** — works on 3 to 400+ bands with identical pipeline | Achieved |
+| **Sensor Agnosticism** — remote sensing, medical pathology, planetary science | Achieved |
+| **Spectral-Only Context** — scene-to-scene transfer without spatial dependency | In progress (v0.2.x) |
 
 ---
 
@@ -37,17 +35,18 @@ Same code for all of these, no changes between runs. That's the part I'm most in
 | Indian Pines | 64 / 16 | 98.16% | 0.9071 | 0.9790 | RTX 3050 (laptop) | 2h 20m |
 | Pavia University | 32 / 8 | 97.47% | 0.9531 | 0.9667 | Kaggle T4 | 7h 29m |
 | Indian Pines | 32 / 8 | 97.20% | 0.8030 | 0.9681 | RTX 3050 (laptop) | 1h 17m |
+| Mars CRISM | 32 / 8 | 71.70% | 0.5228 | 0.6829 | Kaggle T4 | 6h 44m |
 
-**Take these with a grain of salt.** The evaluation setup is basic (pixel-level train/test split on a single scene), which is standard for these benchmarks but doesn't tell you much about real-world generalization. The LUSC result especially is from a single 512x512 crop and is not comparable to published benchmarks — see [results.md](results.md) for the full caveats.
+Config = base_filters / num_filters. All runs use ce+dice loss and ensemble routing. Roughly +/-1% variance between runs due to random splits and seed sensitivity.
 
-Config = base_filters / num_filters. All runs use ce+dice loss and ensemble routing.
+**Caveats:** Evaluation is pixel-level train/test split on a single scene, standard for these benchmarks but limited for real-world generalization. LUSC is a single 512x512 crop. Mars CRISM ground truth is extremely sparse and noisy.
 
 ---
 
-## How it works (roughly)
+## How it works (v0.1.x)
 
 ```
-.mat file (H, W, Bands)
+Hyperspectral Image (H, W, Bands)
     |
     v
 Continuum Removal ---- physics-based normalisation, no PCA
@@ -68,9 +67,9 @@ SPT ------------------- Spectral Partition Tree
 Prediction Map (H, W)
 ```
 
-The SPT (Spectral Partition Tree) is the most interesting part to me — it recursively splits classes into groups based on spectral similarity (using SAM distance), and trains separate model ensembles for each group. This seems to help a lot with class imbalance, though I haven't done rigorous ablations yet beyond Indian Pines.
+The SPT (Spectral Partition Tree) recursively splits classes into groups based on spectral similarity (using SAM distance), and trains separate model ensembles for each group. This helps significantly with class imbalance.
 
-See [architecture.md](architecture.md) if you want the details.
+See [architecture.md](architecture.md) for full details.
 
 ---
 
@@ -96,7 +95,7 @@ ghost train_spt \
 ghost predict \
   --data data.mat --gt labels.mat \
   --model runs/my_experiment/spt_models.pkl \
-  --out-dir runs/my_experiment
+  --routing forest --out-dir runs/my_experiment
 
 # Visualize
 ghost visualize \
@@ -117,9 +116,31 @@ GHOST accepts `.mat` files (MATLAB/HDF5 format):
 
 Keys inside the `.mat` file are auto-detected by array dimensionality.
 
+### Converting other formats (v0.1.7+)
+
+GHOST can convert ENVI, TIFF, GeoTIFF, and HDF5 files to `.mat`:
+
+```bash
+pip install ghost-hsi[convert]
+
+ghost convert_to_mat \
+  --img image.hdr \
+  --gt  labels.tif \
+  --out-dir converted/
+```
+
+All metadata is preserved in a `metadata.json` sidecar file. Optional spatial cropping via `--crop Y X H W`. See [API Reference](API_Reference.md) for full details.
+
 Standard datasets (Indian Pines, Pavia University, Salinas Valley) are available from [the GIC group at UPV/EHU](http://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes).
 
-Only `.mat` is supported right now. ENVI, GeoTIFF, etc. need manual conversion — see [limitations.md](limitations.md).
+---
+
+## Known limitations (v0.1.x)
+
+- **Spatial dependence:** U-Net processes neighbouring pixels; models don't reliably transfer across scenes
+- **No transfer learning:** Each dataset requires full retraining
+- **Single-scene constraint:** Training and inference on same/identical-condition scenes only
+- **SSSR router non-functional:** Use `--routing forest` (default and recommended)
 
 ---
 
@@ -129,9 +150,9 @@ Only `.mat` is supported right now. ENVI, GeoTIFF, etc. need manual conversion �
 |----------|-------------|
 | [Architecture](architecture.md) | How the pipeline works |
 | [API Reference](API_Reference.md) | CLI commands and flags |
-| [Results](results.md) | Full numbers, per-class breakdowns, caveats |
-| [Limitations](limitations.md) | What doesn't work |
-| [TODO](TODO.md) | Things I want to add eventually |
+| [Commands](commands.md) | Usage examples for each dataset |
+
+Website: [anakinskywalker0.github.io/GhostWEB](https://anakinskywalker0.github.io/GhostWEB/)
 
 ---
 

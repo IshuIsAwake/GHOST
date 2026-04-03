@@ -12,6 +12,7 @@ ghost <command> [arguments]
 | `ghost train_spt` | **Full GHOST pipeline** — Spectral Partition Tree + ensembles |
 | `ghost predict` | Run inference on test split, compute metrics |
 | `ghost visualize` | Generate 3-panel segmentation figure |
+| `ghost convert_to_mat` | Convert ENVI / TIFF / GeoTIFF / HDF5 to `.mat` format |
 | `ghost demo` | Show bundled dataset paths and example command |
 | `ghost version` | Print version |
 | `ghost flower` | Easter egg |
@@ -262,6 +263,71 @@ ghost visualize \
   --dataset indian_pines \
   --title   "GHOST - Indian Pines" \
   --out-dir runs/indian_pines
+```
+
+---
+
+## ghost convert_to_mat
+
+Convert ENVI, TIFF, GeoTIFF, or HDF5 hyperspectral images to `.mat` format. Requires optional dependencies: `pip install ghost-hsi[convert]`
+
+```bash
+ghost convert_to_mat --img <path> --out-dir <path> [options]
+```
+
+### Required
+
+| Flag | Description |
+|------|-------------|
+| `--img` | Path to hyperspectral image file (`.hdr`, `.tif`, `.tiff`, `.h5`, `.hdf5`, `.nc`) |
+| `--out-dir` | Output directory for `.mat` and metadata files |
+
+### Optional
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--gt` | `None` | Path to ground-truth labels (`.mat`, `.png`, `.tif`, `.hdr`) |
+| `--crop` | `None` | Spatial crop: `Y X Height Width` (e.g. `--crop 448 2560 512 512`) |
+| `--data-key` | `data` | Key name for image data in the output `.mat` |
+| `--gt-key` | `gt` | Key name for ground truth in the output `.mat` |
+
+### Format auto-detection
+
+| Extension | Format | Library |
+|-----------|--------|---------|
+| `.hdr`, `.img` | ENVI | `spectral` |
+| `.tif`, `.tiff` | TIFF / GeoTIFF | `rasterio` |
+| `.h5`, `.hdf5`, `.he5`, `.hdf`, `.nc` | HDF5 / NetCDF4 | `h5py` |
+
+For HDF5 files with multiple datasets, specify the dataset path: `file.h5:/radiance/radiance`
+
+### Output files
+
+| File | Description |
+|------|-------------|
+| `data.mat` | Hyperspectral image data |
+| `gt.mat` | Ground truth labels (only if `--gt` provided) |
+| `metadata.json` | All preserved metadata (CRS, wavelengths, transforms, band names, etc.) |
+
+### Examples
+
+```bash
+# ENVI to .mat
+ghost convert_to_mat \
+  --img scene.hdr \
+  --gt  labels.tif \
+  --out-dir converted/
+
+# GeoTIFF with spatial crop
+ghost convert_to_mat \
+  --img satellite.tif \
+  --out-dir converted/ \
+  --crop 100 200 512 512
+
+# HDF5 with specific dataset
+ghost convert_to_mat \
+  --img aviris.nc:/radiance/radiance \
+  --out-dir converted/
 ```
 
 ---
