@@ -30,8 +30,7 @@ runs/
 *.ipynb
 
 # Data (external datasets — bundled data lives in ghost/data/)
-data/
-!ghost/data/
+/data/
 
 # Large files / downloads
 *.zip
@@ -45,9 +44,3 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-
-# Scratch / personal notes
-commands.md
-context.md
-update.md
-new_architecture.md
