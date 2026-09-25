@@ -66,10 +66,12 @@ def test_visualize_follows_the_checkpoint(tiny, tmp_path):
 
 
 def test_v01_trainer_still_runs(tmp_path):
+    # v0.1 saves only when val mIoU beats 0 at a validation epoch (every 10th), so it needs to learn quickly here.
     cube, gt = make_scene(H=32, W=32, B=16, n_classes=3, seed=2)
     data, gt_path = write_mat(tmp_path / "s.mat", cube, gt)
     out = tmp_path / "v01"
-    r = run_cli("train", "--arch", "0.1.7", "--data", data, "--gt", gt_path, "--epochs", 10, "--out-dir", out)
+    r = run_cli("train", "--arch", "0.1.7", "--data", data, "--gt", gt_path, "--epochs", 20, "--lr", "1e-3",
+                "--out-dir", out)
     assert r.returncode == 0, r.stdout + r.stderr
     assert (out / "best_model.pth").exists() and (out / "test_results.csv").exists()
 
