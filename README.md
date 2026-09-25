@@ -22,7 +22,7 @@ ghost demo
 | **Data Agnosticism** — band count, class count, spatial dims read at runtime | Achieved |
 | **Band Count Agnosticism** — any band count runs through the identical pipeline | By design; results measured from 61 bands (LUSC) up |
 | **Sensor Agnosticism** — remote sensing, medical pathology, planetary science | Achieved |
-| **Spectral-Only Context** — scene-to-scene transfer without spatial dependency | v0.2.0 pipeline shipped; benchmarks pending |
+| **Spectral-Only Context** — scene-to-scene transfer without spatial dependency | v0.2.0 shipped; single-scene benchmark done, cross-scene test pending |
 
 ---
 
@@ -63,8 +63,13 @@ MLP head ------------- class per pixel → prediction map (H, W)
 ```
 
 It is the default for `ghost train`; `--arch 0.1.7` runs the v0.1 pipeline, and `ghost train_spt` stays on
-0.1.7 until SPT is ported. Predict works without labels. Indian Pines numbers for 0.2.0 are pending the
-benchmark protocol in [benchmarks/](benchmarks/).
+0.1.7 until SPT is ported. Predict works without labels.
+
+On Indian Pines (5 seeds, same pixels for every method), 0.2.0 reaches **73.9 ± 1.4% OA** with 50 labelled
+pixels per class and **87.2 ± 0.5%** with v0.1's 20% split. That is about 7 points above an SVM or random
+forest. It is level with v0.1's flat U-Net on OA and 21 points above it on mean per-class accuracy, without
+using neighbouring pixels. Details and the protocol are in [benchmarks/](benchmarks/); a cross-scene test
+is still to come.
 
 ---
 

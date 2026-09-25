@@ -6,7 +6,8 @@ Readings were fixed before any run (fixed split = 50 per class, 15 for small cla
   - v0.2 on the fixed split: about 40% or less means broken; 75–85% is expected; 95% or more means look
     for leakage.
   - v0.2 below the SVM on the same split means the ResNet is not earning its place.
-  - Shuffled labels should score near the majority baseline.
+  - Shuffled labels should score at chance: kappa near 0. (Chance OA is not the majority baseline here;
+    training is class-balanced, so guesses spread across all classes.)
 """
 from __future__ import annotations
 
@@ -37,10 +38,10 @@ def load_runs(root: str) -> dict:
     return groups
 
 
-def reading(key, oa_mean, svm_by_split) -> str:
+def reading(key, oa_mean, kappa_mean, svm_by_split) -> str:
     label, arch, split = key[0], key[1], key[2]
     if 'shuffled' in label:
-        return ''
+        return 'at chance' if abs(kappa_mean) <= 0.05 else 'above chance: look for leakage'
     notes = []
     if arch == '0.2.0' and split == 'fixed':
         if oa_mean <= 0.45:
@@ -78,7 +79,7 @@ def main():
         s = stats[key]
         fmt = lambda m: f"{s[m][0] * 100:.2f} ± {s[m][1] * 100:.2f}"
         rows.append(list(key) + [s['n'], fmt('oa'), fmt('aa'), fmt('kappa'), fmt('miou'),
-                                 f"{s['baseline'][0] * 100:.1f}", reading(key, s['oa'][0], svm_by_split)])
+                                 f"{s['baseline'][0] * 100:.1f}", reading(key, s['oa'][0], s['kappa'][0], svm_by_split)])
 
     print('| ' + ' | '.join(header) + ' |')
     print('|' + '---|' * len(header))
