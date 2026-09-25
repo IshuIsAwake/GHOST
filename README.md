@@ -20,9 +20,9 @@ ghost demo
 | Goal | Status |
 |------|--------|
 | **Data Agnosticism** — band count, class count, spatial dims read at runtime | Achieved |
-| **Band Count Agnosticism** — works on 3 to 400+ bands with identical pipeline | Achieved |
+| **Band Count Agnosticism** — any band count runs through the identical pipeline | By design; results measured from 61 bands (LUSC) up |
 | **Sensor Agnosticism** — remote sensing, medical pathology, planetary science | Achieved |
-| **Spectral-Only Context** — scene-to-scene transfer without spatial dependency | In progress (v0.2.x) |
+| **Spectral-Only Context** — scene-to-scene transfer without spatial dependency | v0.2.0 pipeline shipped; benchmarks pending |
 
 ---
 
@@ -40,6 +40,31 @@ ghost demo
 Config = base_filters / num_filters. All runs use ce+dice loss and ensemble routing. Roughly +/-1% variance between runs due to random splits and seed sensitivity.
 
 **Caveats:** Evaluation is pixel-level train/test split on a single scene, standard for these benchmarks but limited for real-world generalization. LUSC is a single 512x512 crop. Mars CRISM ground truth is extremely sparse and noisy.
+
+---
+
+## v0.2.0 — per-pixel pipeline
+
+v0.1's U-Net sees neighbouring pixels, so it learns the layout of the training scene. Architecture 0.2.0
+classifies every pixel from its own spectrum:
+
+```
+Any format (.mat, .hdr, .tif, .h5)
+    |
+    v
+Continuum removal ---- once per scene, on the raw spectra
+    |                  full (≥64 bands): upper convex hull of the smoothed spectrum
+    |                  simple (3–63): line from the first to the last band
+    v
+1-D dilated ResNet --- per pixel; blocks are dropped when their reach exceeds the band count
+    |
+    v
+MLP head ------------- class per pixel → prediction map (H, W)
+```
+
+It is the default for `ghost train`; `--arch 0.1.7` runs the v0.1 pipeline, and `ghost train_spt` stays on
+0.1.7 until SPT is ported. Predict works without labels. Indian Pines numbers for 0.2.0 are pending the
+benchmark protocol in [benchmarks/](benchmarks/).
 
 ---
 
@@ -82,7 +107,15 @@ pip install ghost-hsi
 # See bundled dataset paths and example command
 ghost demo
 
-# Train with Spectral Partition Tree
+# Train (architecture 0.2.0, per-pixel)
+ghost train --data data.mat --gt labels.mat --loss dice --out-dir runs/my_experiment
+
+# Segment any scene with the same sensor, with or without labels
+ghost predict --model runs/my_experiment/ghost_model.pt --data scene.tif --out-dir runs/my_experiment
+ghost visualize --model runs/my_experiment/ghost_model.pt --data data.mat --gt labels.mat \
+  --out-dir runs/my_experiment
+
+# v0.1.7: train with the Spectral Partition Tree
 ghost train_spt \
   --data data.mat --gt labels.mat \
   --loss dice \
@@ -91,7 +124,7 @@ ghost train_spt \
   --epochs 400 --patience 50 --min_epochs 40 \
   --out-dir runs/my_experiment
 
-# Predict
+# Predict with an SPT model
 ghost predict \
   --data data.mat --gt labels.mat \
   --model runs/my_experiment/spt_models.pkl \
@@ -104,21 +137,22 @@ ghost visualize \
   --out-dir runs/my_experiment
 ```
 
-A flat baseline (no SPT) is available via `ghost train`.
+The v0.1 flat baseline (no SPT) is `ghost train --arch 0.1.7`. `ghost version` lists the architectures.
 
 ---
 
 ## Data format
 
-GHOST accepts `.mat` files (MATLAB/HDF5 format):
-- **Data file:** 3D array `(H, W, Bands)` — the hyperspectral cube
-- **Ground truth file:** 2D array `(H, W)` — integer class labels, 0 = background
+- **Data file:** a cube read as `(H, W, Bands)`
+- **Ground truth file:** integer class labels `(H, W)`, 0 = unlabelled
 
-Keys inside the `.mat` file are auto-detected by array dimensionality.
+Architecture 0.2.0 reads `.mat` (including MATLAB v7.3), ENVI `.hdr`, TIFF/GeoTIFF and `.h5` directly
+(`pip install ghost-hsi[convert]` for the non-`.mat` readers). Pixels with a missing or all-zero spectrum are
+skipped and appear as 0 in prediction maps. The v0.1.7 pipeline reads `.mat` only.
 
-### Converting other formats (v0.1.7+)
+### Converting to .mat
 
-GHOST can convert ENVI, TIFF, GeoTIFF, and HDF5 files to `.mat`:
+`convert_to_mat` still converts ENVI, TIFF, GeoTIFF and HDF5 files to `.mat`:
 
 ```bash
 pip install ghost-hsi[convert]
@@ -142,6 +176,12 @@ Standard datasets (Indian Pines, Pavia University, Salinas Valley) are available
 - **Single-scene constraint:** Training and inference on same/identical-condition scenes only
 - **SSSR router non-functional:** Use `--routing forest` (default and recommended)
 
+## Known limitations (v0.2.0)
+
+- **No SPT or CRF yet:** both are planned for 0.2.1
+- **Single scene:** trains on one labelled scene at a time
+- **Memory:** the whole scene is loaded and preprocessed at once
+
 ---
 
 ## Docs
@@ -150,7 +190,7 @@ Standard datasets (Indian Pines, Pavia University, Salinas Valley) are available
 |----------|-------------|
 | [Architecture](architecture.md) | How the pipeline works |
 | [API Reference](API_Reference.md) | CLI commands and flags |
-| [Commands](commands.md) | Usage examples for each dataset |
+| [Benchmarks](benchmarks/) | Indian Pines protocol for 0.2.0 |
 
 Website: [anakinskywalker0.github.io/GhostWEB](https://anakinskywalker0.github.io/GhostWEB/)
 
@@ -158,7 +198,7 @@ Website: [anakinskywalker0.github.io/GhostWEB](https://anakinskywalker0.github.i
 
 ## License
 
-Proprietary. All rights reserved. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 ---
 

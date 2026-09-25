@@ -8,20 +8,95 @@ ghost <command> [arguments]
 
 | Command | Description |
 |---------|-------------|
-| `ghost train` | Train a single flat model (no SPT) |
-| `ghost train_spt` | **Full GHOST pipeline** — Spectral Partition Tree + ensembles |
-| `ghost predict` | Run inference on test split, compute metrics |
-| `ghost visualize` | Generate 3-panel segmentation figure |
+| `ghost train` | Train a model. Architecture 0.2.0 (per-pixel) by default; `--arch 0.1.7` for the v0.1 flat U-Net |
+| `ghost train_spt` | v0.1.7 pipeline: Spectral Partition Tree + ensembles (architecture 0.1.7 only) |
+| `ghost predict` | Segment a scene; score it when labels are given |
+| `ghost visualize` | Generate a segmentation figure |
 | `ghost convert_to_mat` | Convert ENVI / TIFF / GeoTIFF / HDF5 to `.mat` format |
-| `ghost demo` | Show bundled dataset paths and example command |
-| `ghost version` | Print version |
+| `ghost demo` | Show bundled dataset paths and example commands |
+| `ghost version` | Print the version and the architectures it ships |
 | `ghost flower` | Easter egg |
 
 ---
 
-## ghost train_spt
+## Choosing the architecture (`--arch`)
 
-The primary training command. Builds the Spectral Partition Tree and trains per-node model ensembles.
+One install ships two architectures: `0.1.7` (3-D conv + U-Net, SPT) and `0.2.0` (per-pixel continuum
+removal + 1-D dilated ResNet, the default). Give the exact version, with or without the `v`.
+
+| Command | How the architecture is chosen |
+|---------|--------------------------------|
+| `train` | `--arch`, default `0.2.0` |
+| `train_spt` | Always `0.1.7`; `--arch 0.2.0` is an error until SPT is ported |
+| `predict`, `visualize` | Read from the `--model` checkpoint; `--arch`, if given, must match it |
+
+---
+
+## ghost train (architecture 0.2.0, default)
+
+Per-pixel training on one labelled scene. Continuum removal runs once on the raw spectra; each pixel is then
+classified from its spectrum alone.
+
+```bash
+ghost train --data <cube> --gt <labels> [options]
+```
+
+Accepts `.mat` (including MATLAB v7.3), ENVI `.hdr`, `.tif`/GeoTIFF and `.h5` for both files.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--cr` | `auto` | Continuum removal: `auto` (full ≥64 bands, simple 3–63, off <3), `full`, `simple`, `off`, `none` (scene z-score, for ablations) |
+| `--split` | `ratio` | `ratio`: v0.1's per-class split (same pixels for the same seed); `fixed`: N per class; `disjoint`: spatial blocks |
+| `--train_ratio` / `--val_ratio` | `0.2` / `0.1` | ratio and disjoint splits. For `fixed`, `--val_ratio` is the share of the non-training pixels |
+| `--samples_per_class` / `--minority_samples` | `50` / `15` | fixed split: training pixels per class, and for classes smaller than that |
+| `--block_size` | `H/10` | disjoint split: block side in pixels |
+| `--channels`, `--embed_dim`, `--depth`, `--kernel_size` | `64`, `128`, `5`, `7` | Encoder; blocks are dropped while their receptive field would exceed the band count |
+| `--head_hidden`, `--dropout` | `128`, `0.3` | MLP head |
+| `--pool` | `avg` | `avg` over bands, or `flatten` to keep band positions |
+| `--epochs`, `--patience`, `--min_epochs` | `300`, `50`, `40` | Early stop on validation mIoU |
+| `--batch_size`, `--lr`, `--weight_decay` | `256`, `1e-3`, `1e-4` | AdamW; LR halves when validation loss plateaus |
+| `--loss` | `ce` | `ce`, `squared_ce`, `focal`, `dice` (0.5·CE + 0.5·Dice, as in v0.1) |
+| `--seed` | `42` | Seeds the split and the initialisation |
+| `--device` | `auto` | `auto`, `cpu`, `cuda` |
+| `--out-dir`, `--save`, `--log` | `.`, `ghost_model.pt`, `training_log.csv` | Outputs |
+
+| Output | Description |
+|--------|-------------|
+| `ghost_model.pt` | Checkpoint: weights, preprocessing, split indices and a fingerprint of the training scene |
+| `training_log.csv` | One row per epoch |
+| `test_results.csv` | Test metrics, same columns as v0.1 |
+| `class_report.csv` | Per-class pixels, IoU, precision, recall |
+| `run_config.json` | Versions, git commit, settings, split sizes, timings and the majority-class baseline of the test split |
+
+---
+
+## ghost predict (architecture 0.2.0)
+
+```bash
+ghost predict --model ghost_model.pt --data <cube> [--gt <labels>] [--out-dir <dir>]
+```
+
+Writes `prediction.npy` (label per pixel, 0 where the spectrum is unusable) and `prediction.png`. With `--gt`:
+on the training scene only its held-out test pixels are scored, which reproduces training's test result; on
+any other scene every labelled pixel is scored. Results go to `predict_results.csv` and
+`predict_class_report.csv`. `--dataset indian_pines|pavia|salinas` names the classes in the legend.
+
+---
+
+## ghost visualize (architecture 0.2.0)
+
+```bash
+ghost visualize --model ghost_model.pt --data <cube> [--gt <labels>] [--dataset indian_pines] [--out-dir <dir>]
+```
+
+Writes `segmentation.png`: false colour | ground truth (if given) | prediction for every pixel.
+`--r_band/--g_band/--b_band` and `--title` work as in v0.1.
+
+---
+
+## ghost train_spt (architecture 0.1.7)
+
+The v0.1.7 training command. Builds the Spectral Partition Tree and trains per-node model ensembles.
 
 ```bash
 ghost train_spt --data <path> --gt <path> [options]
@@ -139,12 +214,12 @@ ghost train_spt \
 
 ---
 
-## ghost train
+## ghost train --arch 0.1.7
 
-Flat model training (no SPT). Useful as a baseline.
+v0.1 flat model training (no SPT). Useful as a baseline.
 
 ```bash
-ghost train --data <path> --gt <path> [options]
+ghost train --arch 0.1.7 --data <path> --gt <path> [options]
 ```
 
 ### Flags
@@ -168,9 +243,9 @@ Additional:
 
 ---
 
-## ghost predict
+## ghost predict (SPT checkpoints, architecture 0.1.7)
 
-Run inference on the test split using a trained model.
+Run inference on the test split using a trained SPT model.
 
 ```bash
 ghost predict --data <path> --gt <path> --model <path> [options]
@@ -215,7 +290,7 @@ ghost predict \
 
 ---
 
-## ghost visualize
+## ghost visualize (SPT checkpoints, architecture 0.1.7)
 
 Generate a 3-panel PNG: false colour composite | ground truth | GHOST prediction.
 

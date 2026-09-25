@@ -2,9 +2,29 @@
 
 This is how the pipeline works. Nothing here is particularly novel — it's mostly standard components wired together in a way that seemed reasonable for hyperspectral data.
 
+GHOST ships two architectures. **0.2.0** (the default, next section) classifies each pixel from its spectrum
+alone. **0.1.7** (the rest of this document) uses a 3-D conv + U-Net with the Spectral Partition Tree.
+
 ---
 
-## Pipeline overview
+## Architecture 0.2.0 — per-pixel
+
+| Stage | What it does |
+|-------|--------------|
+| Loader | `.mat` (incl. v7.3), ENVI, TIFF/GeoTIFF, HDF5 → `(H, W, Bands)`. Pixels with a non-finite, all-zero or no-data spectrum are skipped |
+| Continuum removal | Once per scene, on raw spectra. **full** (≥64 bands): Savitzky-Golay smoothing (window ≈5% of bands), Andrew's monotone-chain upper hull of the smoothed spectrum, then raw ÷ max(hull, raw), so output lies in (0, 1]. **simple** (3–63): raw ÷ line from first to last band, then ÷ pixel max. **off** (<3): ÷ pixel max. The hull uses real wavelengths when the file provides them |
+| Encoder | 1-D dilated ResNet on `(pixels, 1, bands)`: stem conv (kernel 7, 64 channels), then residual blocks with dilation 1, 2, 4, … Width and length never change. A block is added only while the cumulative receptive field fits in the band count: 4 blocks at 200 bands (reach 187), 3 at 103, 2 at 61, 1 at 32 |
+| Pooling | Average over bands (default) or flatten, which keeps band positions |
+| Head | Linear → BatchNorm → ReLU → Dropout 0.3 → Linear |
+| Training | AdamW (1e-3), batches of 256 pixels, early stop on validation mIoU |
+
+Every operator is per pixel, so nothing learns scene layout. Continuum removal also divides out each pixel's
+brightness; `--cr none` (v0.1's scene z-score) keeps brightness, for the ablation that tests whether that
+matters.
+
+---
+
+## Pipeline overview (0.1.7)
 
 ```
                          Input: .mat file (H, W, Bands)
