@@ -12,330 +12,31 @@ import time
 import numpy as np
 import scipy.io as sio
 
+from ghost.datasets.loader import (
+    detect_format as _detect_format,
+    load_envi, load_hdf5, load_labels as _load_gt, load_mat_cube, load_tiff,
+)
 from ghost.utils.display import (
     BOLD, RESET, CYAN, GREEN, YELLOW, RED, GRAY, _c,
     print_config_box,
 )
 
-
-# ── Format detection ─────────────────────────────────────────────────────────
-
-_EXT_MAP = {
-    '.hdr': 'envi',
-    '.img': 'envi',
-    '.lan': 'envi',
-    '.tif': 'tiff',
-    '.tiff': 'tiff',
-    '.h5': 'hdf5',
-    '.hdf5': 'hdf5',
-    '.he5': 'hdf5',
-    '.hdf': 'hdf5',
-}
-
-
-def _strip_dataset_specifier(path: str) -> str:
-    """Remove HDF5 dataset specifier (e.g. 'file.h5:/dataset')."""
-    if '://' not in path and ':/' in path:
-        return path.rsplit(':/', 1)[0]
-    if '::' in path:
-        return path.rsplit('::', 1)[0]
-    return path
-
-
-def _detect_format(path: str) -> str:
-    clean = _strip_dataset_specifier(path)
-    ext = os.path.splitext(clean)[1].lower()
-    # .nc files are NetCDF4/HDF5
-    if ext == '.nc':
-        ext = '.h5'
-    fmt = _EXT_MAP.get(ext)
-    if fmt is None:
-        raise ValueError(
-            f"Unrecognised file extension '{ext}'. "
-            f"Supported: {', '.join(sorted(set(_EXT_MAP.values())))}"
-        )
-    return fmt
-
-
-# ── Dependency checks ────────────────────────────────────────────────────────
-
-def _check_dep(name: str):
-    """Raise a helpful error when an optional dep is missing."""
-    try:
-        __import__(name)
-    except ImportError:
-        extras = {
-            'spectral': 'spectral',
-            'rasterio': 'rasterio',
-            'h5py': 'h5py',
-        }
-        pkg = extras.get(name, name)
-        print(
-            f"\n{RED}{BOLD}  Missing dependency: {name}{RESET}\n"
-            f"  Install it with:  pip install {pkg}\n"
-            f"  Or install all convert deps:  pip install ghost-hsi[convert]\n"
-        )
-        sys.exit(1)
-
-
-# ── Loaders ──────────────────────────────────────────────────────────────────
-
-def _load_envi(path: str) -> tuple[np.ndarray, dict]:
-    """Load an ENVI file (.hdr/.img pair). Returns (data, metadata)."""
-    _check_dep('spectral')
-    import spectral.io.envi as envi
-
-    # Accept either .hdr or .img — find the pair
-    base, ext = os.path.splitext(path)
-    if ext.lower() == '.hdr':
-        hdr_path = path
-        # Try common data file extensions
-        img_path = None
-        for candidate_ext in ['', '.img', '.dat', '.raw', '.bsq', '.bil', '.bip']:
-            candidate = base + candidate_ext
-            if candidate != hdr_path and os.path.isfile(candidate):
-                img_path = candidate
-                break
-        if img_path is None:
-            # spectral can sometimes find it automatically
-            img_path = None
-    else:
-        # User passed the data file; look for .hdr
-        img_path = path
-        hdr_path = base + '.hdr'
-        if not os.path.isfile(hdr_path):
-            raise FileNotFoundError(
-                f"Cannot find ENVI header: {hdr_path}\n"
-                f"ENVI files require a .hdr header alongside the data file."
-            )
-
-    if img_path is not None:
-        img = envi.open(hdr_path, img_path)
-    else:
-        img = envi.open(hdr_path)
-
-    data = np.array(img.load())
-
-    # Extract metadata from the ENVI header
-    meta = {}
-    header = img.metadata if hasattr(img, 'metadata') else {}
-    for key in ['description', 'samples', 'lines', 'bands', 'header offset',
-                'data type', 'interleave', 'byte order', 'wavelength',
-                'wavelength units', 'band names', 'map info',
-                'coordinate system string', 'default bands',
-                'fwhm', 'reflectance scale factor', 'sensor type']:
-        if key in header:
-            meta[key] = header[key]
-
-    meta['_source_format'] = 'ENVI'
-    meta['_source_file'] = os.path.abspath(hdr_path)
-
-    return data, meta
-
-
-def _load_tiff(path: str) -> tuple[np.ndarray, dict]:
-    """Load a TIFF or GeoTIFF. Returns (data, metadata)."""
-    _check_dep('rasterio')
-    import rasterio
-
-    meta = {}
-    with rasterio.open(path) as src:
-        # Read all bands → (bands, H, W), transpose to (H, W, bands)
-        data = src.read()  # shape: (C, H, W)
-        data = np.transpose(data, (1, 2, 0))  # → (H, W, C)
-
-        meta['driver'] = src.driver
-        meta['dtype'] = str(src.dtypes[0])
-        meta['nodata'] = src.nodata
-        meta['width'] = src.width
-        meta['height'] = src.height
-        meta['count'] = src.count
-
-        # CRS
-        if src.crs is not None:
-            meta['crs'] = src.crs.to_string()
-            meta['crs_wkt'] = src.crs.to_wkt()
-
-        # Affine transform
-        if src.transform is not None:
-            t = src.transform
-            meta['transform'] = [t.a, t.b, t.c, t.d, t.e, t.f]
-
-        # Bounds
-        meta['bounds'] = {
-            'left': src.bounds.left,
-            'bottom': src.bounds.bottom,
-            'right': src.bounds.right,
-            'top': src.bounds.top,
-        }
-
-        # Band descriptions / names
-        if src.descriptions and any(d is not None for d in src.descriptions):
-            meta['band_descriptions'] = list(src.descriptions)
-
-        # Tags (TIFF metadata)
-        tags = src.tags()
-        if tags:
-            meta['tags'] = dict(tags)
-
-        # Per-band tags
-        band_tags = {}
-        for i in range(1, src.count + 1):
-            bt = src.tags(i)
-            if bt:
-                band_tags[str(i)] = dict(bt)
-        if band_tags:
-            meta['band_tags'] = band_tags
-
-    meta['_source_format'] = 'GeoTIFF' if meta.get('crs') else 'TIFF'
-    meta['_source_file'] = os.path.abspath(path)
-
-    return data, meta
-
-
-def _load_hdf5(path: str) -> tuple[np.ndarray, dict]:
-    """Load an HDF5 file. Returns (data, metadata).
-
-    Auto-detects the main dataset (largest array) if no specific dataset
-    is specified via 'path.h5:/dataset_name' syntax.
-    """
-    _check_dep('h5py')
-    import h5py
-
-    # Check for dataset specifier: file.h5:/path/to/dataset
-    dataset_key = None
-    if '://' not in path and ':/' in path:
-        path, dataset_key = path.rsplit(':/', 1)
-    elif '::' in path:
-        path, dataset_key = path.rsplit('::', 1)
-
-    meta = {}
-    with h5py.File(path, 'r') as f:
-        # Catalogue all datasets
-        datasets = {}
-
-        def _visitor(name, obj):
-            if isinstance(obj, h5py.Dataset):
-                datasets[name] = obj.shape
-
-        f.visititems(_visitor)
-        meta['available_datasets'] = {k: list(v) for k, v in datasets.items()}
-
-        if dataset_key is not None:
-            if dataset_key not in f:
-                raise KeyError(
-                    f"Dataset '{dataset_key}' not found in {path}.\n"
-                    f"Available datasets: {list(datasets.keys())}"
-                )
-            ds = f[dataset_key]
-        else:
-            # Pick the largest dataset by number of elements
-            if not datasets:
-                raise ValueError(f"No datasets found in {path}")
-            dataset_key = max(datasets, key=lambda k: np.prod(datasets[k]))
-            ds = f[dataset_key]
-
-        data = ds[:]
-        meta['dataset_used'] = dataset_key
-
-        # Dataset attributes
-        ds_attrs = {k: _json_safe(v) for k, v in ds.attrs.items()}
-        if ds_attrs:
-            meta['dataset_attrs'] = ds_attrs
-
-        # File-level attributes
-        file_attrs = {k: _json_safe(v) for k, v in f.attrs.items()}
-        if file_attrs:
-            meta['file_attrs'] = file_attrs
-
-    # If data is 2D (H, W) or already 3D (H, W, C), keep as-is
-    # If 3D as (C, H, W) with C << H and C << W, transpose
-    if data.ndim == 3:
-        c, h, w = data.shape
-        if c < h and c < w:
-            data = np.transpose(data, (1, 2, 0))
-            meta['_transposed'] = 'CHW → HWC'
-
-    meta['_source_format'] = 'HDF5'
-    meta['_source_file'] = os.path.abspath(path)
-
-    return data, meta
-
-
-def _json_safe(val):
-    """Make HDF5 attribute values JSON-serializable."""
-    if isinstance(val, np.ndarray):
-        return val.tolist()
-    if isinstance(val, (np.integer,)):
-        return int(val)
-    if isinstance(val, (np.floating,)):
-        return float(val)
-    if isinstance(val, bytes):
-        return val.decode('utf-8', errors='replace')
-    return val
-
-
-# ── Format dispatch ──────────────────────────────────────────────────────────
-
 _LOADERS = {
-    'envi': _load_envi,
-    'tiff': _load_tiff,
-    'hdf5': _load_hdf5,
+    'envi': load_envi,
+    'tiff': load_tiff,
+    'hdf5': load_hdf5,
+    'mat': load_mat_cube,
 }
 
 
-# ── Ground truth loading ─────────────────────────────────────────────────────
-
-def _load_gt(path: str) -> tuple[np.ndarray, dict]:
-    """Load a ground-truth file. Supports .mat, .png/.tif images, and ENVI."""
-    ext = os.path.splitext(path)[1].lower()
-    meta = {'_source_file': os.path.abspath(path)}
-
-    if ext == '.mat':
-        mat = sio.loadmat(path)
-        # Find the ground-truth array (skip MATLAB internal keys)
-        candidates = {k: v for k, v in mat.items() if not k.startswith('_')}
-        if len(candidates) == 1:
-            key = list(candidates.keys())[0]
-        elif 'gt' in candidates:
-            key = 'gt'
-        elif 'groundtruth' in candidates:
-            key = 'groundtruth'
-        else:
-            key = max(candidates, key=lambda k: np.prod(np.array(candidates[k]).shape))
-        gt = np.array(candidates[key]).squeeze()
-        meta['mat_key'] = key
-        meta['_source_format'] = 'MAT'
-        return gt, meta
-
-    if ext in ('.png', '.jpg', '.jpeg', '.bmp'):
-        from PIL import Image
-        gt = np.array(Image.open(path))
-        meta['_source_format'] = 'image'
-        if gt.ndim == 3:
-            meta['_note'] = (
-                'Ground truth loaded as RGB image. '
-                'You may need to map RGB values to class labels manually.'
-            )
-        return gt, meta
-
-    if ext in ('.tif', '.tiff'):
-        _check_dep('rasterio')
-        import rasterio
-        with rasterio.open(path) as src:
-            gt = src.read(1)  # single band
-            if src.crs is not None:
-                meta['crs'] = src.crs.to_string()
-        meta['_source_format'] = 'GeoTIFF'
-        return gt, meta
-
-    if ext in ('.hdr', '.img'):
-        data, envi_meta = _load_envi(path)
-        gt = data.squeeze()
-        meta.update(envi_meta)
-        return gt, meta
-
-    raise ValueError(f"Unsupported ground truth format: {ext}")
+def _exit_missing_dependency(exc: ImportError):
+    """CLI-only: print the loader's install hint and stop."""
+    first, *rest = str(exc).splitlines() or ['Missing dependency']
+    print(f"\n{RED}{BOLD}  {first}{RESET}")
+    for line in rest:
+        print(f"  {line}")
+    print()
+    sys.exit(1)
 
 
 # ── Crop ─────────────────────────────────────────────────────────────────────
@@ -454,7 +155,10 @@ def main():
     print(f"\n  {BOLD}Loading image:{RESET} {args.img}")
     fmt = _detect_format(args.img)
     print(f"  {GRAY}Detected format: {fmt.upper()}{RESET}")
-    data, meta = _LOADERS[fmt](args.img)
+    try:
+        data, meta = _LOADERS[fmt](args.img)
+    except ImportError as exc:
+        _exit_missing_dependency(exc)
     print(f"  {GREEN}✓{RESET} Loaded: shape={data.shape} dtype={data.dtype}")
 
     # ── Load ground truth ────────────────────────────────────────────────
@@ -462,7 +166,10 @@ def main():
     gt_meta = None
     if args.gt is not None:
         print(f"\n  {BOLD}Loading ground truth:{RESET} {args.gt}")
-        gt, gt_meta = _load_gt(args.gt)
+        try:
+            gt, gt_meta = _load_gt(args.gt)
+        except ImportError as exc:
+            _exit_missing_dependency(exc)
         print(f"  {GREEN}✓{RESET} Loaded: shape={gt.shape} dtype={gt.dtype}")
 
         # Spatial dimension check
