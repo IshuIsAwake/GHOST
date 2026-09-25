@@ -12,7 +12,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 
 from ghost.utils.display import BOLD, GREEN, RED, RESET, print_visualize_start
-from ghost.visualize import CLASS_NAMES, PALETTE, false_colour
+from ghost.visualize import CLASS_NAMES, PALETTE
 
 BACKGROUND = '#1a1a2e'
 
@@ -25,6 +25,15 @@ def class_colormap(max_id: int) -> ListedColormap:
         extra = matplotlib.colormaps['gist_ncar'](np.linspace(0.05, 0.95, n - len(PALETTE)))
         colours += [tuple(c) for c in extra]
     return ListedColormap(colours)
+
+
+def false_colour(cube: np.ndarray, r_band=None, g_band=None, b_band=None) -> np.ndarray:
+    """RGB from three bands (default 75/50/25% of the spectrum), each stretched on its own 2–98th percentiles."""
+    B = cube.shape[-1]
+    bands = [b if b is not None else int(B * f) for b, f in zip((r_band, g_band, b_band), (0.75, 0.50, 0.25))]
+    rgb = np.nan_to_num(cube[:, :, bands]).astype(np.float64)
+    lo, hi = np.percentile(rgb, 2, axis=(0, 1)), np.percentile(rgb, 98, axis=(0, 1))
+    return np.clip((rgb - lo) / (hi - lo + 1e-8), 0, 1)
 
 
 def class_names_for(dataset: str | None):
@@ -60,12 +69,12 @@ def save_segmentation_figure(cube, gt, pred_map, class_ids, path, class_names=No
                              title='GHOST Segmentation', bands=(None, None, None)):
     max_id = max(class_ids + ([int(gt.max())] if gt is not None else []))
     cmap = class_colormap(max_id)
-    panels = [(false_colour(np.nan_to_num(cube).transpose(2, 0, 1), *bands), 'False Colour Composite', None)]
+    panels = [(false_colour(cube, *bands), 'False Colour Composite', None)]
     if gt is not None:
         panels.append((gt, 'Ground Truth Labels', cmap))
     panels.append((pred_map, 'GHOST Prediction (every pixel)', cmap))
 
-    fig = Figure(figsize=(7 * len(panels), 8), facecolor=BACKGROUND)
+    fig = Figure(figsize=(6 * len(panels), 7), facecolor=BACKGROUND)
     for ax, (image, name, cm) in zip(fig.subplots(1, len(panels)), panels):
         _panel(ax, image, name, cm, max_id)
     ids = sorted(set(class_ids) | (set(np.unique(gt[gt > 0]).tolist()) if gt is not None else set()))
