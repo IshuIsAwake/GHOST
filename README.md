@@ -9,9 +9,12 @@ GHOST is a general-purpose hyperspectral segmentation tool — point it at a hyp
 **Supports Python 3.9 - 3.12**
 
 ```bash
-pip install ghost-hsi
+pip install git+https://github.com/IshuIsAwake/GHOST.git
 ghost demo
 ```
+
+Version 0.2.0 is on GitHub only for now. The command above builds it with Cython, so it needs a C compiler.
+`pip install ghost-hsi` still installs 0.1.7 from PyPI, which has the v0.1 pipeline only.
 
 ---
 
@@ -106,8 +109,8 @@ See [architecture.md](architecture.md) for full details.
 ## Quick start
 
 ```bash
-# Install
-pip install ghost-hsi
+# Install 0.2.0 from GitHub (PyPI's ghost-hsi is still 0.1.7)
+pip install git+https://github.com/IshuIsAwake/GHOST.git
 
 # See bundled dataset paths and example command
 ghost demo
@@ -151,16 +154,17 @@ The v0.1 flat baseline (no SPT) is `ghost train --arch 0.1.7`. `ghost version` l
 - **Data file:** a cube read as `(H, W, Bands)`
 - **Ground truth file:** integer class labels `(H, W)`, 0 = unlabelled
 
-Architecture 0.2.0 reads `.mat` (including MATLAB v7.3), ENVI `.hdr`, TIFF/GeoTIFF and `.h5` directly
-(`pip install ghost-hsi[convert]` for the non-`.mat` readers). Pixels with a missing or all-zero spectrum are
-skipped and appear as 0 in prediction maps. The v0.1.7 pipeline reads `.mat` only.
+Architecture 0.2.0 reads `.mat` (including MATLAB v7.3), ENVI `.hdr`, TIFF/GeoTIFF and `.h5` directly. The
+non-`.mat` readers need the `convert` extra:
+`pip install "ghost-hsi[convert] @ git+https://github.com/IshuIsAwake/GHOST.git"`. Pixels with a missing or
+all-zero spectrum are skipped and appear as 0 in prediction maps. The v0.1.7 pipeline reads `.mat` only.
 
 ### Converting to .mat
 
 `convert_to_mat` still converts ENVI, TIFF, GeoTIFF and HDF5 files to `.mat`:
 
 ```bash
-pip install ghost-hsi[convert]
+pip install "ghost-hsi[convert] @ git+https://github.com/IshuIsAwake/GHOST.git"
 
 ghost convert_to_mat \
   --img image.hdr \

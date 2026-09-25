@@ -46,10 +46,10 @@ Accepts `.mat` (including MATLAB v7.3), ENVI `.hdr`, `.tif`/GeoTIFF and `.h5` fo
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--cr` | `auto` | Continuum removal: `auto` (full ≥64 bands, simple 3–63, off <3), `full`, `simple`, `off`, `none` (scene z-score, for ablations) |
-| `--split` | `ratio` | `ratio`: v0.1's per-class split (same pixels for the same seed); `fixed`: N per class; `disjoint`: spatial blocks |
-| `--train_ratio` / `--val_ratio` | `0.2` / `0.1` | ratio and disjoint splits. For `fixed`, `--val_ratio` is the share of the non-training pixels |
+| `--split` | `ratio` | `ratio`: v0.1's per-class split (same pixels for the same seed); `fixed`: N per class; `disjoint`: square blocks, each whole in one split. Every class gets a training block, rarest first; a class inside a single block trains but is never tested |
+| `--train_ratio` / `--val_ratio` | `0.2` / `0.1` | ratio and disjoint splits. For `disjoint` they are per-class targets that whole blocks overshoot. For `fixed`, `--val_ratio` is the share of the non-training pixels |
 | `--samples_per_class` / `--minority_samples` | `50` / `15` | fixed split: training pixels per class, and for classes smaller than that |
-| `--block_size` | `H/10` | disjoint split: block side in pixels |
+| `--block_size` | `min(H, W)/10` | disjoint split: block side in pixels |
 | `--channels`, `--embed_dim`, `--depth`, `--kernel_size` | `64`, `128`, `5`, `7` | Encoder; blocks are dropped while their receptive field would exceed the band count |
 | `--head_hidden`, `--dropout` | `128`, `0.3` | MLP head |
 | `--pool` | `avg` | `avg` over bands, or `flatten` to keep band positions |

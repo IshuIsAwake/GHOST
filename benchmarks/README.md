@@ -4,20 +4,35 @@ Indian Pines protocol for architecture 0.2.0. Every script runs one process at a
 runs, so it can be stopped and resumed. Results land in `runs/bench/`.
 
 ```bash
-python benchmarks/indian_pines.py --control          # 0.2.0 on both splits, 5 seeds
-python benchmarks/indian_pines.py --v01              # v0.1 flat U-Net on the same pixels, 5 seeds
-python benchmarks/indian_pines.py --shuffle-control  # permuted labels: should score at chance
-python benchmarks/svm_baseline.py                    # SVM and random forest on the same pixels
-python benchmarks/indian_pines.py --ablation         # continuum removal × pooling, 5 seeds
-python benchmarks/summarize.py                       # the table
+python benchmarks/indian_pines.py --control             # 0.2.0 on the ratio and fixed splits, 5 seeds
+python benchmarks/indian_pines.py --v01                 # v0.1 flat U-Net on the ratio split, 5 seeds
+python benchmarks/indian_pines.py --v01-fixed           # v0.1 flat U-Net on the fixed split, 5 seeds
+python benchmarks/indian_pines.py --disjoint            # 0.2.0 and v0.1 flat on the block split, 5 seeds
+python benchmarks/indian_pines.py --shuffle-control     # permuted labels: should score at chance
+python benchmarks/indian_pines.py --ablation            # continuum removal × pooling, 5 seeds
+python benchmarks/indian_pines.py --v01-spt             # v0.1 SPT 32/8 on ratio and fixed, seed 0, as shipped
+python benchmarks/indian_pines.py --v01-spt-train-tree  # the same, tree built from training pixels only
+python benchmarks/svm_baseline.py --splits ratio fixed disjoint  # SVM and random forest, same pixels
+python benchmarks/summarize.py                          # the table
 ```
 
-Two splits, both with a validation set for early stopping:
+The v0.1 modes other than `--v01` run v0.1.7's own trainers through `v01_split.py`, which swaps in v0.2's
+split for the same seed so both architectures score identical pixels (for the ratio split it changes
+nothing). Shipped v0.1.7 builds SPT's tree from every labelled pixel, test pixels included;
+`--tree-from-train` builds it from training pixels only. An SPT run takes about 1h20m on a laptop RTX 3050.
+
+Three splits, each with a validation set for early stopping:
 
 | Split | Train / val / test | Always guessing the biggest class |
 |-------|--------------------|-----------------------------------|
 | `ratio` (v0.1's, same pixels per seed) | 2,045 / 1,018 / 7,186 | 23.9% |
 | `fixed` (50 per class, 15 for classes under 50) | 695 / 950 / 8,604 | 25.2% |
+| `disjoint` (14×14 blocks, each whole in one split) | 3,029–3,192 / 1,802–2,053 / 5,039–5,418 | 29.5–32.1% |
+
+The block split gives every class a training block, rarest class first, and a test block where the class
+spans more than one. It then hands out blocks until each class has about 20% of its pixels in training and
+10% in validation; whole blocks overshoot that, to about 30% and 19% here. Grass-pasture-mowed sits inside
+one block, so it trains but is never tested: 15 of the 16 classes are scored.
 
 Readings fixed before any run:
 

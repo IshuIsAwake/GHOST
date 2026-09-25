@@ -73,7 +73,14 @@ Instead of PCA (which requires choosing how many components to keep), I use cont
 CR(lambda) = spectrum(lambda) / continuum(lambda)
 ```
 
-The continuum is the convex hull envelope of the reflectance spectrum. Dividing by it removes brightness variation and leaves absorption feature shape. The nice thing is it works on any band count without configuration and doesn't throw away information.
+Dividing by the continuum removes brightness variation and leaves the shape of absorption features, on any
+band count and without configuration.
+
+In 0.1.7, though, the continuum is not a hull. It is a straight line from each spectrum's minimum to its maximum
+across the bands, which the code itself calls a simplification. It also runs after the dataset z-scores the
+whole scene, so spectra take both signs and the line crosses zero. On Indian Pines every pixel's does: the
+model's input reaches roughly ±800,000, and 81% of pixels have a value beyond ±100. Architecture 0.2.0 uses
+a real upper hull on the raw spectra instead.
 
 **Source:** `ghost/preprocessing/continuum_removal.py`
 
@@ -121,7 +128,8 @@ This is the part I find most interesting. Instead of training one model on all c
 
 **Tree construction:**
 
-1. Compute mean spectrum per class (after continuum removal)
+1. Compute each class's mean spectrum from the z-scored scene, then divide it by the same min-to-max line as
+   in section 1
 2. Build pairwise SAM (Spectral Angle Mapper) distance matrix
 3. Find the two most spectrally distant classes → split seeds
 4. Assign remaining classes to whichever seed they're closer to
@@ -133,6 +141,16 @@ This is the part I find most interesting. Instead of training one model on all c
 - Any class has fewer than 10 pixels
 - Depth >= 3
 - Mean intra-node SAM < 0.05 (classes too similar to split further)
+
+**Known problems (0.1.7, measured on Indian Pines):**
+- **The tree sees test labels.** `ghost train_spt` builds it from every labelled pixel, test pixels
+  included (`train_rssp.py:191` passes the full ground truth), so class means and pixel counts come partly
+  from the test set. `benchmarks/v01_split.py --tree-from-train` builds it from training pixels only.
+- **Its angles are not spectral.** The z-scored class means take both signs, so step 1's division blows
+  up, to values from −1,795 to 794. 86 of the 120 class pairs then sit above π/2, up to 2.09 rad, an angle
+  two non-negative spectra cannot make.
+- **Small classes stop it at the root.** Built from training pixels alone on the 20% split, the tree is a
+  single node: Oats has 4 training pixels, below the 10-pixel stop.
 
 **Training:**
 
@@ -161,8 +179,9 @@ An attempt at replacing hard argmax at each tree node with probabilistic soft ro
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | Loss | CrossEntropy | Options: `ce`, `dice`, `focal`, `squared_ce` |
-| Optimiser | AdamW | `weight_decay=1e-4` |
-| Scheduler | ReduceLROnPlateau | `patience=10, factor=0.5` |
-| Early stopping | patience=50 | No improvement for N epochs → stop |
-| Checkpoint | best val mIoU | Per node, per ensemble member |
+| Optimiser | AdamW | `lr=1e-4`, `weight_decay=1e-4` |
+| Epoch | one step | The whole scene is one sample (batch size 1), so each epoch is a single optimiser step |
+| Scheduler | ReduceLROnPlateau | `patience=10, factor=0.5`, stepped on the training loss |
+| Early stopping | `train_spt` only | Up to 400 epochs; stops after 50 without improvement, never before epoch 40, validating every 20. Flat `ghost train --arch 0.1.7` has none: it runs all 300 epochs, validating every 10 |
+| Checkpoint | best val mIoU | Flat: one model. SPT: per node, per ensemble member |
 | Splits | stratified | Every class appears in every split |
