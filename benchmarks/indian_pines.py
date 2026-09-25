@@ -4,6 +4,9 @@
     python benchmarks/indian_pines.py --v01              # v0.1 flat U-Net on the same ratio-split pixels
     python benchmarks/indian_pines.py --shuffle-control  # v0.2 on permuted labels: should sit at chance
     python benchmarks/indian_pines.py --ablation         # fixed split × CR mode × pooling × 5 seeds
+    python benchmarks/indian_pines.py --v01-fixed        # v0.1 flat on the fixed split (via v01_split.py)
+    python benchmarks/indian_pines.py --v01-spt          # v0.1 SPT 32/8, both splits, as shipped
+    python benchmarks/indian_pines.py --v01-spt-train-tree   # same, tree built from training pixels only
     python benchmarks/summarize.py                       # the table
 
 Add --dry-run to print the commands without running them.
@@ -28,6 +31,9 @@ from ghost.v0_2.metrics import majority_share  # noqa: E402
 from ghost.v0_2.splits import make_split  # noqa: E402
 
 SPLIT_PARAMS = {'train_ratio': 0.2, 'val_ratio': 0.1, 'samples_per_class': 50, 'minority_samples': 15}
+SHIM = os.path.join(REPO, 'benchmarks', 'v01_split.py')
+SPT_FLAGS = ['--base_filters', '32', '--num_filters', '8', '--ensembles', '5', '--leaf_ensembles', '3',
+             '--epochs', '400', '--patience', '50', '--min_epochs', '40']  # the README's 97.20% recipe
 LOSS = 'dice'  # v0.1's recipe (0.5·CE + 0.5·Dice), so both architectures train on the same objective
 
 
@@ -39,13 +45,18 @@ def baseline_for(gt: np.ndarray, split: str, seed: int) -> float:
 def plan_runs(args, data: str, gt_path: str, gt: np.ndarray) -> list:
     runs = []
 
-    def add(label, arch, split, cr, pool, seed, gt_file=None, labels=None):
+    def add(label, arch, split, cr, pool, seed, gt_file=None, labels=None, v01_command=None, tree_from_train=False):
         gt_file = gt_file or gt_path
         labels = gt if labels is None else labels
-        out = os.path.join(args.out, arch, split, f"{cr}-{pool}-{LOSS}" + ('-shuffled' if 'shuffle' in label else ''),
-                           f"seed{seed}")
+        suffix = ('-shuffled' if 'shuffle' in label else '') + ('-traintree' if tree_from_train else '')
+        out = os.path.join(args.out, arch, split, f"{cr}-{pool}-{LOSS}{suffix}", f"seed{seed}")
         cmd = [sys.executable, '-m', 'ghost.cli', 'train', '--arch', arch, '--data', data, '--gt', gt_file,
                '--loss', LOSS, '--seed', str(seed), '--out-dir', out]
+        if v01_command:
+            # v0.1's own trainers, with v0.2's split swapped in (identity for the ratio split)
+            cmd = ([sys.executable, SHIM, '--split', split] + (['--tree-from-train'] if tree_from_train else [])
+                   + ['--', v01_command, '--data', data, '--gt', gt_file, '--loss', LOSS, '--seed', str(seed),
+                      '--out-dir', out] + (SPT_FLAGS if v01_command == 'train_spt' else []))
         if arch == '0.2.0':
             cmd += ['--split', split, '--cr', cr, '--pool', pool, '--device', args.device]
             if args.epochs:
@@ -69,10 +80,19 @@ def plan_runs(args, data: str, gt_path: str, gt: np.ndarray) -> list:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 scipy.io.savemat(path, {'gt': shuffled})
             add('v0.2 shuffled labels', '0.2.0', 'fixed', 'auto', 'avg', seed, gt_file=path, labels=shuffled)
+        if args.v01_fixed:
+            add('v0.1 flat reference', '0.1.7', 'fixed', 'v0.1', 'unet', seed, v01_command='train')
         if args.ablation:
             for cr in ('none', 'off', 'simple', 'full'):
                 for pool in ('avg', 'flatten'):
                     add('v0.2 ablation', '0.2.0', 'fixed', cr, pool, seed)
+    for seed in args.spt_seeds:
+        for split in ('ratio', 'fixed'):
+            if args.v01_spt:
+                add('v0.1 SPT 32/8, shipped tree', '0.1.7', split, 'v0.1', 'spt', seed, v01_command='train_spt')
+            if args.v01_spt_train_tree:
+                add('v0.1 SPT 32/8, tree from training pixels', '0.1.7', split, 'v0.1', 'spt', seed,
+                    v01_command='train_spt', tree_from_train=True)
     return runs
 
 
@@ -82,14 +102,21 @@ def main():
     p.add_argument('--v01', action='store_true')
     p.add_argument('--shuffle-control', dest='shuffle_control', action='store_true')
     p.add_argument('--ablation', action='store_true')
+    p.add_argument('--v01-fixed', dest='v01_fixed', action='store_true')
+    p.add_argument('--v01-spt', dest='v01_spt', action='store_true')
+    p.add_argument('--v01-spt-train-tree', dest='v01_spt_train_tree', action='store_true')
+    p.add_argument('--spt-seeds', dest='spt_seeds', type=int, nargs='+', default=[0],
+                   help='SPT runs take about 1h17m each on a 3050, so one seed by default')
     p.add_argument('--seeds', type=int, nargs='+', default=[0, 1, 2, 3, 4])
     p.add_argument('--epochs', type=int, default=None, help='v0.2 only; default is ghost train\'s 300')
     p.add_argument('--device', default='auto', choices=['auto', 'cpu', 'cuda'])
     p.add_argument('--out', default=os.path.join('runs', 'bench'))
     p.add_argument('--dry-run', dest='dry_run', action='store_true')
     args = p.parse_args()
-    if not (args.control or args.v01 or args.shuffle_control or args.ablation):
-        p.error('choose at least one of --control, --v01, --shuffle-control, --ablation')
+    modes = (args.control, args.v01, args.shuffle_control, args.ablation, args.v01_fixed, args.v01_spt,
+             args.v01_spt_train_tree)
+    if not any(modes):
+        p.error('choose at least one mode, e.g. --control (see --help)')
 
     data, gt_path = indian_pines_path()
     gt = np.squeeze(load_labels(gt_path)[0]).astype(np.int64)

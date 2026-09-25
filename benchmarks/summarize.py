@@ -31,6 +31,8 @@ def load_runs(root: str) -> dict:
             meta = json.load(f)
         with open(results, newline='') as f:
             row = dict(zip(*csv.reader(f)))
+        if 'test_oa' not in row:  # train_spt's layout: routing, OA, mIoU, Dice, Precision, Recall, AA, kappa
+            row = {'test_oa': row['OA'], 'test_aa': row['AA'], 'test_kappa': row['kappa'], 'test_miou': row['mIoU']}
         key = (meta['label'], meta['arch'], meta['split'], meta['cr'], meta['pool'], meta['loss'])
         groups[key].append({'oa': float(row['test_oa']), 'aa': float(row['test_aa']),
                             'kappa': float(row['test_kappa']), 'miou': float(row['test_miou']),
