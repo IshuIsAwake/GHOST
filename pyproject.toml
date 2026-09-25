@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghost-hsi"
-version = "0.1.7"
+version = "0.2.0"
 description = "GHOST: Generalizable Hyperspectral Observation & Segmentation Toolkit"
 readme = "README.md"
 license = {text = "MIT License"}
@@ -44,6 +44,14 @@ convert = [
     "spectral>=0.23",
     "rasterio>=1.3",
     "h5py>=3.8",
+    "Pillow>=9.0",
+]
+test = [
+    "pytest>=7.0",
+    "spectral>=0.23",
+    "rasterio>=1.3",
+    "h5py>=3.8",
+    "Pillow>=9.0",
 ]
 
 [project.urls]
@@ -57,3 +65,8 @@ include = ["ghost*"]
 
 [tool.setuptools.package-data]
 ghost = ["configs/*.yaml", "data/indian_pines/*.mat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["slow: end-to-end training or subprocess tests (deselect with -m 'not slow')"]
