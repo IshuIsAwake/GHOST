@@ -5,6 +5,7 @@
     python benchmarks/indian_pines.py --shuffle-control  # v0.2 on permuted labels: should sit at chance
     python benchmarks/indian_pines.py --ablation         # fixed split × CR mode × pooling × 5 seeds
     python benchmarks/indian_pines.py --v01-fixed        # v0.1 flat on the fixed split (via v01_split.py)
+    python benchmarks/indian_pines.py --disjoint         # 0.2.0 and v0.1 flat on spatially disjoint blocks
     python benchmarks/indian_pines.py --v01-spt          # v0.1 SPT 32/8, both splits, as shipped
     python benchmarks/indian_pines.py --v01-spt-train-tree   # same, tree built from training pixels only
     python benchmarks/summarize.py                       # the table
@@ -82,6 +83,9 @@ def plan_runs(args, data: str, gt_path: str, gt: np.ndarray) -> list:
             add('v0.2 shuffled labels', '0.2.0', 'fixed', 'auto', 'avg', seed, gt_file=path, labels=shuffled)
         if args.v01_fixed:
             add('v0.1 flat reference', '0.1.7', 'fixed', 'v0.1', 'unet', seed, v01_command='train')
+        if args.disjoint:
+            add('v0.2 control', '0.2.0', 'disjoint', 'auto', 'avg', seed)
+            add('v0.1 flat reference', '0.1.7', 'disjoint', 'v0.1', 'unet', seed, v01_command='train')
         if args.ablation:
             for cr in ('none', 'off', 'simple', 'full'):
                 for pool in ('avg', 'flatten'):
@@ -103,6 +107,7 @@ def main():
     p.add_argument('--shuffle-control', dest='shuffle_control', action='store_true')
     p.add_argument('--ablation', action='store_true')
     p.add_argument('--v01-fixed', dest='v01_fixed', action='store_true')
+    p.add_argument('--disjoint', action='store_true')
     p.add_argument('--v01-spt', dest='v01_spt', action='store_true')
     p.add_argument('--v01-spt-train-tree', dest='v01_spt_train_tree', action='store_true')
     p.add_argument('--spt-seeds', dest='spt_seeds', type=int, nargs='+', default=[0],
@@ -113,8 +118,8 @@ def main():
     p.add_argument('--out', default=os.path.join('runs', 'bench'))
     p.add_argument('--dry-run', dest='dry_run', action='store_true')
     args = p.parse_args()
-    modes = (args.control, args.v01, args.shuffle_control, args.ablation, args.v01_fixed, args.v01_spt,
-             args.v01_spt_train_tree)
+    modes = (args.control, args.v01, args.shuffle_control, args.ablation, args.v01_fixed, args.disjoint,
+             args.v01_spt, args.v01_spt_train_tree)
     if not any(modes):
         p.error('choose at least one mode, e.g. --control (see --help)')
 

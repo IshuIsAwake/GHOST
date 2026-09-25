@@ -46,6 +46,21 @@ def test_disjoint_blocks_never_straddle_splits():
     assert not (block_sets[0] & block_sets[1] or block_sets[0] & block_sets[2] or block_sets[1] & block_sets[2])
 
 
+@pytest.mark.parametrize("seed", range(5))
+def test_disjoint_split_trains_and_tests_every_class_that_spans_two_blocks(seed):
+    from ghost.data import indian_pines_path
+    from ghost.datasets.loader import load_labels
+    gt = np.squeeze(load_labels(indian_pines_path()[1])[0]).astype(np.int64)
+    with pytest.warns(UserWarning, match="test split has no pixels of classes \\[7\\]"):  # one 14×14 block
+        train, _, test = disjoint_split(gt, 0.2, 0.1, seed=seed)
+    flat = gt.reshape(-1)
+    trained, tested = set(flat[train].tolist()), set(flat[test].tolist())
+    assert trained == set(range(1, 17))
+    assert tested == set(range(1, 17)) - {7}
+    share = np.bincount(flat[train], minlength=17)[1:] / np.bincount(flat[flat > 0], minlength=17)[1:]
+    assert share.min() >= 0.05
+
+
 @pytest.mark.parametrize("mode", SPLIT_MODES)
 def test_split_partitions_the_labelled_pixels(mode):
     _, gt = make_scene(H=30, W=24, B=8, n_classes=3, seed=2)

@@ -71,25 +71,56 @@ def fixed_split(labels, samples_per_class=50, minority_samples=15, val_ratio=0.1
 
 
 def disjoint_split(labels, train_ratio=0.2, val_ratio=0.1, seed=42, block_size=None):
-    """Spatially disjoint split: the scene is cut into square blocks and whole blocks go to one split."""
+    """Spatially disjoint split: the scene is cut into square blocks and each block goes whole to one split.
+
+    Rarest class first, each class gets one training block (picked in proportion to its pixels there) and, if it
+    spans another, one test block. Blocks are then handed out until each class has about train_ratio of its
+    pixels in training blocks and val_ratio in validation blocks. A class inside a single block trains but
+    cannot be tested.
+    """
     labels = np.asarray(labels)
     H, W = labels.shape
     block_size = block_size or max(1, min(H, W) // 10)
     coords = np.argwhere(labels > 0)
     if len(coords) == 0:
         raise ValueError("The ground truth has no labelled pixels")
+    values = labels[coords[:, 0], coords[:, 1]]
     n_blocks_w = (W + block_size - 1) // block_size
     block_ids = (coords[:, 0] // block_size) * n_blocks_w + coords[:, 1] // block_size
-    blocks = np.unique(block_ids)
-    np.random.RandomState(seed).shuffle(blocks)
-    n_train, n_val = max(1, int(len(blocks) * train_ratio)), max(1, int(len(blocks) * val_ratio))
-    in_train = np.isin(block_ids, blocks[:n_train])
-    in_val = np.isin(block_ids, blocks[n_train:n_train + n_val])
-    splits = (coords[in_train], coords[in_val], coords[~in_train & ~in_val])
 
-    all_classes = set(np.unique(labels[labels > 0]).tolist())
+    classes, totals = np.unique(values, return_counts=True)
+    counts = {}  # block → per-class pixel counts, aligned with `classes`
+    for b, v in zip(block_ids.tolist(), np.searchsorted(classes, values).tolist()):
+        counts.setdefault(b, np.zeros(len(classes), dtype=np.int64))[v] += 1
+    rng = np.random.RandomState(seed)
+    order = np.argsort(totals, kind='stable')
+    owner = {}  # block → 0 train, 1 val, 2 test; blocks left unassigned are test too
+    got = np.zeros((2, len(classes)), dtype=np.int64)
+
+    for ci in order:
+        mine = [b for b in sorted(counts) if counts[b][ci]]
+        for split in (0, 2):
+            free = [b for b in mine if b not in owner]
+            if free and not any(owner.get(b) == split for b in mine):
+                # the training pick favours blocks holding more of the class, so a sliver rarely trains alone
+                weights = np.array([counts[b][ci] for b in free], dtype=float) if split == 0 else np.ones(len(free))
+                b = free[rng.choice(len(free), p=weights / weights.sum())]
+                owner[b] = split
+                if split == 0:
+                    got[0] += counts[b]
+    for ci in order:
+        free = [b for b in sorted(counts) if counts[b][ci] and b not in owner]
+        rng.shuffle(free)
+        for split, ratio in ((0, train_ratio), (1, val_ratio)):
+            while free and got[split, ci] < ratio * totals[ci]:
+                b = free.pop()
+                owner[b] = split
+                got[split] += counts[b]
+
+    split_of = np.array([owner.get(b, 2) for b in block_ids.tolist()])
+    splits = tuple(coords[split_of == k] for k in range(3))
     for name, cc in zip(('train', 'val', 'test'), splits):
-        missing = all_classes - set(labels[cc[:, 0], cc[:, 1]].tolist())
+        missing = set(classes.tolist()) - set(labels[cc[:, 0], cc[:, 1]].tolist())
         if missing:
             warnings.warn(f"{name} split has no pixels of classes {sorted(missing)}", UserWarning)
     return tuple(_flat(cc, W) for cc in splits)

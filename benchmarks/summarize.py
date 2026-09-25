@@ -34,13 +34,17 @@ def load_runs(root: str) -> dict:
         if 'test_oa' not in row:  # train_spt's layout: routing, OA, mIoU, Dice, Precision, Recall, AA, kappa
             row = {'test_oa': row['OA'], 'test_aa': row['AA'], 'test_kappa': row['kappa'], 'test_miou': row['mIoU']}
         key = (meta['label'], meta['arch'], meta['split'], meta['cr'], meta['pool'], meta['loss'])
-        groups[key].append({'oa': float(row['test_oa']), 'aa': float(row['test_aa']),
+        config_path = os.path.join(os.path.dirname(meta_path), 'run_config.json')
+        if os.path.exists(config_path):  # 'auto' resolves to a concrete mode; record it for the SVM comparison
+            with open(config_path) as f:
+                meta['cr_resolved'] = json.load(f)['cr_mode']
+        groups[key].append({'cr_resolved': meta.get('cr_resolved', meta['cr']), 'oa': float(row['test_oa']), 'aa': float(row['test_aa']),
                             'kappa': float(row['test_kappa']), 'miou': float(row['test_miou']),
                             'baseline': meta['majority_baseline'], 'seed': meta['seed']})
     return groups
 
 
-def reading(key, oa_mean, kappa_mean, svm_by_split) -> str:
+def reading(key, oa_mean, kappa_mean, svm_by_split, cr_resolved) -> str:
     label, arch, split = key[0], key[1], key[2]
     if 'shuffled' in label:
         return 'at chance' if abs(kappa_mean) <= 0.05 else 'above chance: look for leakage'
@@ -54,7 +58,7 @@ def reading(key, oa_mean, kappa_mean, svm_by_split) -> str:
             notes.append('expected band')
         else:
             notes.append('outside 75–85%')
-    svm = svm_by_split.get((split, key[3]))
+    svm = svm_by_split.get((split, cr_resolved))
     if arch == '0.2.0' and svm and oa_mean < svm[0] - svm[1]:
         notes.append('below SVM')
     return ', '.join(notes)
@@ -81,7 +85,7 @@ def main():
         s = stats[key]
         fmt = lambda m: f"{s[m][0] * 100:.2f} ± {s[m][1] * 100:.2f}"
         rows.append(list(key) + [s['n'], fmt('oa'), fmt('aa'), fmt('kappa'), fmt('miou'),
-                                 f"{s['baseline'][0] * 100:.1f}", reading(key, s['oa'][0], s['kappa'][0], svm_by_split)])
+                                 f"{s['baseline'][0] * 100:.1f}", reading(key, s['oa'][0], s['kappa'][0], svm_by_split, groups[key][0]['cr_resolved'])])
 
     print('| ' + ' | '.join(header) + ' |')
     print('|' + '---|' * len(header))
